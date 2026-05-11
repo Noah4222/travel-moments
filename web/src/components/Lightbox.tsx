@@ -72,11 +72,24 @@ export function Lightbox({
 
   if (!asset) return null;
 
+  // On mobile, taps that land on controls (buttons, links, inputs) must not
+  // be tracked by the swipe handler — otherwise the synthesised click after
+  // touchend gets eaten by the bubble path and the button feels unresponsive.
+  function targetIsInteractive(e: { target: EventTarget | null }) {
+    const el = e.target as HTMLElement | null;
+    return !!el?.closest("button, a, input, textarea, select, [role=button]");
+  }
+
   return (
     <div
-      onClick={onClose}
+      onClick={(e) => {
+        // Only close when the click is truly on the backdrop, not bubbling
+        // up from a button / image / panel.
+        if (e.target === e.currentTarget) onClose();
+      }}
       onTouchStart={(e) => {
         if (singleMode || assets.length <= 1) return;
+        if (targetIsInteractive(e)) return;
         const t = e.touches[0];
         touchRef.current = { x: t.clientX, y: t.clientY, t: Date.now() };
       }}
@@ -84,6 +97,7 @@ export function Lightbox({
         const start = touchRef.current;
         touchRef.current = null;
         if (!start) return;
+        if (targetIsInteractive(e)) return;
         const t = e.changedTouches[0];
         const dx = t.clientX - start.x;
         const dy = t.clientY - start.y;
@@ -287,6 +301,10 @@ function Stage({ asset, mode }: { asset: LightboxAsset; mode: Mode }) {
 
 function ExifAndCommentsPanel({ asset, mode }: { asset: LightboxAsset; mode: Mode }) {
   const [exif, setExif] = useState<Record<string, unknown> | null>(null);
+  // Collapsed by default on narrow screens; open on tablets and wider.
+  const [exifOpen, setExifOpen] = useState(() =>
+    typeof window !== "undefined" && window.innerWidth >= 640,
+  );
   const [commentsOpen, setCommentsOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -310,10 +328,11 @@ function ExifAndCommentsPanel({ asset, mode }: { asset: LightboxAsset; mode: Mod
       )}
     >
       {asset.kind === "photo" && (
-        <div className="rounded-xl bg-white p-3 dark:bg-zinc-900">
-          <p className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
-            📷 EXIF
-          </p>
+        <CollapseCard
+          title="📷 EXIF"
+          open={exifOpen}
+          onToggle={() => setExifOpen((v) => !v)}
+        >
           {exif === null ? (
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <Spinner className="h-4 w-4" />
@@ -322,7 +341,7 @@ function ExifAndCommentsPanel({ asset, mode }: { asset: LightboxAsset; mode: Mod
           ) : (
             <ExifList exif={exif} />
           )}
-        </div>
+        </CollapseCard>
       )}
       {showComments && (
         <CollapseCard

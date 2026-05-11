@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
 import type { ImgURLs } from "@/lib/api";
-import { supportsAVIF } from "@/lib/imageFormat";
+import { supportsAVIF, markAVIFBroken } from "@/lib/imageFormat";
 import { Spinner } from "./Spinner";
 import { cn } from "@/lib/cn";
 
 /**
  * Picks AVIF when supported, otherwise WebP. Only the chosen variant is
  * requested from OSS. Shows a shimmer + spinner until the image decodes.
+ *
+ * If the AVIF URL fails to load — most commonly because the bucket hasn't
+ * enabled OSS 图片处理高级套餐 and returns a JSON error body that Chrome
+ * blocks with ORB — we transparently fall back to the WebP URL. After two
+ * such failures in a row we also mark AVIF as broken for the rest of the
+ * page so further previews skip straight to WebP.
  */
 export function PicturePreview({
   urls,
@@ -20,6 +26,7 @@ export function PicturePreview({
   loading?: "lazy" | "eager";
 }) {
   const [src, setSrc] = useState<string | null>(null);
+  const [triedFallback, setTriedFallback] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [errored, setErrored] = useState(false);
 
@@ -27,6 +34,7 @@ export function PicturePreview({
     let cancelled = false;
     setLoaded(false);
     setErrored(false);
+    setTriedFallback(false);
     if (!urls?.webp && !urls?.avif) {
       setSrc(null);
       return;
@@ -40,6 +48,17 @@ export function PicturePreview({
       cancelled = true;
     };
   }, [urls?.avif, urls?.webp]);
+
+  function onError() {
+    // If AVIF failed and we haven't tried yet, swap to WebP.
+    if (!triedFallback && src && urls?.avif && src === urls.avif && urls.webp) {
+      markAVIFBroken();
+      setTriedFallback(true);
+      setSrc(urls.webp);
+      return;
+    }
+    setErrored(true);
+  }
 
   if (!urls?.webp && !urls?.avif) {
     return (
@@ -76,7 +95,7 @@ export function PicturePreview({
           loading={loading}
           decoding="async"
           onLoad={() => setLoaded(true)}
-          onError={() => setErrored(true)}
+          onError={onError}
           className={cn(
             "h-full w-full object-cover transition-opacity duration-200",
             loaded ? "opacity-100" : "opacity-0",

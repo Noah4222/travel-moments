@@ -21,6 +21,12 @@ const WEBP_DATA_URL =
   "data:image/webp;base64,UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAwA0JaQAA3AA/vuUAAA=";
 
 export function supportsAVIF(): Promise<boolean> {
+  // If the server is known not to deliver AVIF (e.g. OSS 图片处理高级套餐
+  // not enabled, response was JSON / blocked by ORB), short-circuit so we
+  // don't keep flapping per-image.
+  if (sessionStorage.getItem("tm.avif.broken") === "1") {
+    return Promise.resolve(false);
+  }
   if (!avifPromise) {
     const cached = sessionStorage.getItem("tm.avif");
     if (cached != null) {
@@ -33,6 +39,16 @@ export function supportsAVIF(): Promise<boolean> {
     }
   }
   return avifPromise;
+}
+
+/**
+ * Called from PicturePreview onError when an AVIF URL fails — the OSS
+ * response is often a JSON error body (Chrome's ORB blocks it). Forces
+ * subsequent previews to use WebP for the rest of the page session.
+ */
+export function markAVIFBroken() {
+  sessionStorage.setItem("tm.avif.broken", "1");
+  avifPromise = Promise.resolve(false);
 }
 
 export function supportsWebP(): Promise<boolean> {
