@@ -1,0 +1,29 @@
+.git
+.github
+.idea
+.vscode
+.env
+.env.*
+!.env.example
+bin/
+data/
+tmp/
+build-errors.log
+*.log
+
+# JS / web
+web/node_modules
+web/dist
+
+# pre-built frontend embed (will be rebuilt inside the image)
+internal/frontend/dist/*
+!internal/frontend/dist/.gitkeep
+
+# editor / OS
+.DS_Store
+**/.DS_Store
+
+# tests / docs not needed by build
+**/*_test.go
+README.md
+CLAUDE.md
