@@ -1,5 +1,31 @@
-import { useCallback, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { api, type UploadPolicy } from "@/lib/api";
+
+/**
+ * Run `fn` over `items` with at most `n` running at a time. Errors thrown
+ * by `fn` are NOT rethrown — the caller is expected to record the failure
+ * on the task and continue with the rest.
+ */
+async function withConcurrency<T>(
+  items: T[],
+  n: number,
+  fn: (item: T, index: number) => Promise<void>,
+) {
+  const limit = Math.max(1, Math.min(n, items.length));
+  let next = 0;
+  const workers = Array.from({ length: limit }, async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      try {
+        await fn(items[i], i);
+      } catch {
+        /* swallowed — fn is expected to surface errors via updateTask */
+      }
+    }
+  });
+  await Promise.all(workers);
+}
 import { Button } from "./ui";
 import { cn } from "@/lib/cn";
 
@@ -78,7 +104,16 @@ export function UploadDropzone({
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [concurrency, setConcurrency] = useState(5);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api.uploadLimits().then((r) => {
+      if (r.concurrency > 0) setConcurrency(r.concurrency);
+    }).catch(() => {
+      /* fall back to default 5 */
+    });
+  }, []);
 
   const updateTask = useCallback((id: string, patch: Partial<Task>) => {
     setTasks((cur) => cur.map((t) => (t.id === id ? { ...t, ...patch } : t)));
@@ -98,8 +133,7 @@ export function UploadDropzone({
         livePhoto: !!(g.photo && g.motion),
       }));
       setTasks((cur) => [...cur, ...newTasks]);
-      for (let i = 0; i < groups.length; i++) {
-        const g = groups[i];
+      await withConcurrency(groups, concurrency, async (g, i) => {
         const t = newTasks[i];
         try {
           await uploadGroup(tripId, g, t.id, updateTask, bearer);
@@ -110,9 +144,9 @@ export function UploadDropzone({
             error: err instanceof Error ? err.message : String(err),
           });
         }
-      }
+      });
     },
-    [tripId, updateTask, onUploaded],
+    [tripId, updateTask, onUploaded, bearer, concurrency],
   );
 
   function onDrop(e: DragEvent<HTMLDivElement>) {

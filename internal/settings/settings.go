@@ -19,6 +19,7 @@ const (
 	KeyUploadCacheCtl  = "upload_cache_control"     // Cache-Control header to apply on upload
 	KeyAssetShareTTL   = "asset_share_default_ttl"  // single-asset share validity (e.g. "168h")
 	KeyUploadTokenTTL  = "upload_token_ttl"          // upload-grant session duration (e.g. "1h")
+	KeyUploadConcurrency = "upload_concurrency"     // max parallel uploads per browser; default 5
 
 	// OSS image-process strings (overrides). Empty → default from oss.ImageProcess.
 	KeyImgThumbWebP   = "image_process_thumb_webp"
@@ -101,7 +102,8 @@ func (s *Store) All() map[string]string {
 		KeyURLCacheTTL:    s.URLCacheTTL().String(),
 		KeyUploadCacheCtl: s.UploadCacheControl(),
 		KeyAssetShareTTL:  s.AssetShareTTL().String(),
-		KeyUploadTokenTTL: s.UploadTokenTTL().String(),
+		KeyUploadTokenTTL:    s.UploadTokenTTL().String(),
+		KeyUploadConcurrency: strconv.Itoa(s.UploadConcurrency()),
 	}
 	for _, k := range ImageProcessKeys {
 		m[k] = s.ImageProcessByKey(k)
@@ -201,6 +203,20 @@ func (s *Store) UploadCacheControl() string {
 	}
 	// Immutable since OSS keys are UUID-suffixed and never overwritten.
 	return "public, max-age=31536000, immutable"
+}
+
+// UploadConcurrency returns the max parallel uploads the front-end should
+// run for a single batch. Clamped to 1..32 to avoid pathological values.
+func (s *Store) UploadConcurrency() int {
+	v := s.Raw(KeyUploadConcurrency)
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 5
+	}
+	if n > 32 {
+		return 32
+	}
+	return n
 }
 
 func (s *Store) UploadTokenTTL() time.Duration {

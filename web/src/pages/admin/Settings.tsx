@@ -28,6 +28,16 @@ const BASIC_ROWS: RowDef[] = [
     label: "单图分享默认过期",
     desc: "通过「分享此图」生成的链接默认多久后失效。例：168h（7 天）",
   },
+  {
+    key: "upload_concurrency",
+    label: "上传并发数",
+    desc: "浏览器单次上传时最多同时进行的文件数，建议 1–8。改完即时生效。",
+  },
+  {
+    key: "upload_token_ttl",
+    label: "一次性上传链接会话时长",
+    desc: "访客消费上传链接后页面停留期的有效时长。默认 1h。",
+  },
 ];
 
 const IMAGE_ROWS: Array<{

@@ -414,6 +414,10 @@ export const api = {
     apiFetch<void>("/auth/totp/enable", { method: "POST", body: { code } }),
   totpDisable: (password: string) =>
     apiFetch<void>("/auth/totp/disable", { method: "POST", body: { password } }),
+
+  // ---- upload knobs (public read-only) ----
+  uploadLimits: () =>
+    apiFetch<{ concurrency: number }>("/upload-limits", { bearer: null }),
 };
 
 export type UploadGrant = {
