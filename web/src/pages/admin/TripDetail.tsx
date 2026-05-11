@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, type Asset, type Trip, type User } from "@/lib/api";
-import { Badge, Button, Card, Input } from "@/components/ui";
+import { Badge, Button, Card, Input, Textarea } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth";
 import { UploadDropzone } from "@/components/UploadDropzone";
 import { AssetGrid } from "@/components/AssetGrid";
@@ -12,33 +13,67 @@ import { UploadGrantsPanel } from "@/components/UploadGrantsPanel";
 
 type NavigateFn = (to: string) => void;
 
-function EditableTitle({
+type EditableTextProps = {
+  /** Current persisted value. */
+  value: string;
+  /** Whether the pencil icon is rendered (and clicking enters edit mode). */
+  editable: boolean;
+  /** Save handler — should resolve when the value is persisted server-side. */
+  onSave: (v: string) => Promise<void>;
+  /** Label shown when the persisted value is empty (e.g. "未设置"). */
+  placeholder?: string;
+  /** Visible-mode wrapper className. Display widget renders inside. */
+  wrapperClassName?: string;
+  /** Display-mode text className. */
+  textClassName?: string;
+  /** Aria/title for the pencil button. */
+  ariaLabel?: string;
+  /** Single-line uses <Input>; multiline uses <Textarea>. */
+  multiline?: boolean;
+  /** If true, an empty value rejects save (used for required fields like title). */
+  required?: boolean;
+  /** Max characters. */
+  maxLength?: number;
+  /** Renders the display-mode text — useful for prefixes like "📍 ". */
+  renderDisplay?: (value: string) => React.ReactNode;
+};
+
+function EditableText({
   value,
   editable,
   onSave,
-}: {
-  value: string;
-  editable: boolean;
-  onSave: (v: string) => Promise<void>;
-}) {
+  placeholder = "未设置",
+  wrapperClassName,
+  textClassName,
+  ariaLabel = "编辑",
+  multiline,
+  required,
+  maxLength,
+  renderDisplay,
+}: EditableTextProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
 
   function start() {
     setDraft(value);
     setEditing(true);
-    // focus on next tick after the input renders
-    setTimeout(() => inputRef.current?.select(), 0);
+    setTimeout(() => {
+      const el = multiline ? taRef.current : inputRef.current;
+      el?.focus();
+      el?.select?.();
+    }, 0);
   }
 
   async function commit() {
     const next = draft.trim();
-    if (!next || next === value) {
+    if (next === value) {
       setEditing(false);
       return;
     }
+    if (required && !next) return;
     setBusy(true);
     try {
       await onSave(next);
@@ -50,49 +85,84 @@ function EditableTitle({
     }
   }
 
-  function onKey(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") {
+  function cancel() {
+    setDraft(value);
+    setEditing(false);
+  }
+
+  function onKey(e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !multiline) {
       e.preventDefault();
       void commit();
     } else if (e.key === "Escape") {
       e.preventDefault();
-      setEditing(false);
+      cancel();
+    } else if (e.key === "Enter" && multiline && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void commit();
     }
   }
 
   if (editing) {
     return (
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Input
-          ref={inputRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKey}
-          maxLength={200}
-          className="!h-auto max-w-xl text-2xl font-semibold sm:text-3xl"
-        />
-        <Button size="sm" onClick={commit} disabled={busy || !draft.trim()}>
-          {busy ? "保存中…" : "保存"}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={busy}>
-          取消
-        </Button>
+      <div className={cn("flex flex-wrap items-start gap-2", wrapperClassName)}>
+        {multiline ? (
+          <Textarea
+            ref={taRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+            maxLength={maxLength}
+            rows={3}
+            className={cn("min-w-0 flex-1", textClassName)}
+          />
+        ) : (
+          <Input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+            maxLength={maxLength}
+            className={cn("min-w-0 flex-1 !h-auto", textClassName)}
+          />
+        )}
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            onClick={commit}
+            disabled={busy || (required && !draft.trim())}
+          >
+            {busy ? "保存中…" : "保存"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={cancel} disabled={busy}>
+            取消
+          </Button>
+        </div>
       </div>
     );
   }
 
+  const isEmpty = !value;
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      <h1 className="break-words text-2xl font-semibold sm:text-3xl">{value}</h1>
+    <div className={cn("flex flex-wrap items-start gap-2", wrapperClassName)}>
+      <span
+        className={cn(
+          "min-w-0 break-words",
+          textClassName,
+          isEmpty && "italic text-zinc-400",
+        )}
+      >
+        {isEmpty ? placeholder : renderDisplay ? renderDisplay(value) : value}
+      </span>
       {editable && (
         <button
           type="button"
           onClick={start}
-          className="rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-          aria-label="编辑标题"
-          title="编辑标题"
+          className="mt-1 rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          aria-label={ariaLabel}
+          title={ariaLabel}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
           </svg>
@@ -204,17 +274,22 @@ export function TripDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <Badge>{trip.slug}</Badge>
-          <EditableTitle
+          <EditableText
             value={trip.title}
             editable={isAdmin}
+            required
+            maxLength={200}
+            ariaLabel="编辑标题"
+            wrapperClassName="mt-2"
+            textClassName="text-2xl font-semibold sm:text-3xl"
             onSave={async (v) => {
               await api.updateTrip(tripId, { title: v });
               await reload();
             }}
           />
-          <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-zinc-500">
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-zinc-500">
             <span className="flex items-center gap-1.5">
               📅
               {isAdmin ? (
@@ -238,13 +313,35 @@ export function TripDetailPage() {
                 </span>
               )}
             </span>
-            {trip.location && <span>📍 {trip.location}</span>}
+            <EditableText
+              value={trip.location ?? ""}
+              editable={isAdmin}
+              maxLength={200}
+              placeholder="未填地点"
+              ariaLabel="编辑地点"
+              textClassName="text-sm"
+              renderDisplay={(v) => <>📍 {v}</>}
+              onSave={async (v) => {
+                await api.updateTrip(tripId, { location: v });
+                await reload();
+              }}
+            />
           </div>
-          {trip.description && (
-            <p className="mt-3 max-w-2xl text-sm text-zinc-600 sm:text-base dark:text-zinc-400">
-              {trip.description}
-            </p>
-          )}
+          <div className="mt-3 max-w-2xl">
+            <EditableText
+              value={trip.description ?? ""}
+              editable={isAdmin}
+              multiline
+              maxLength={2000}
+              placeholder="还没有描述。点 ✎ 写一段。"
+              ariaLabel="编辑描述"
+              textClassName="text-sm text-zinc-600 sm:text-base dark:text-zinc-400"
+              onSave={async (v) => {
+                await api.updateTrip(tripId, { description: v });
+                await reload();
+              }}
+            />
+          </div>
         </div>
         <div className="flex w-full flex-wrap items-start gap-2 sm:w-auto">
           <Button
