@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { api, type UploadPolicy } from "@/lib/api";
+import { shrinkForOSS } from "@/lib/imageCompress";
 
 /**
  * Run `fn` over `items` with at most `n` running at a time. Errors thrown
@@ -240,8 +241,9 @@ async function uploadGroup(
 
   if (g.motion) {
     update(taskID, { status: "uploading", progress: 0.02 });
+    const photoFile = (await shrinkForOSS(g.photo)).file;
     const [photoRes, motionRes] = await Promise.all([
-      uploadRawFile(tripId, g.photo, "photo", (p) =>
+      uploadRawFile(tripId, photoFile, "photo", (p) =>
         update(taskID, { progress: 0.02 + p * 0.45 }),
         bearer,
       ),
@@ -250,14 +252,14 @@ async function uploadGroup(
         bearer,
       ),
     ]);
-    const dims = await readImageDimsSafe(g.photo);
+    const dims = await readImageDimsSafe(photoFile);
     update(taskID, { status: "registering", progress: 0.97 });
     await api.uploadComplete({
       trip_id: tripId,
       oss_key: photoRes.oss_key,
       kind: "photo",
-      mime: g.photo.type,
-      size: g.photo.size,
+      mime: photoFile.type,
+      size: photoFile.size,
       width: dims?.width,
       height: dims?.height,
       is_live_photo: true,
@@ -279,24 +281,31 @@ async function uploadOne(
   update: (id: string, patch: Partial<Task>) => void,
   bearer?: string,
 ) {
+  // Photos > 20MB break OSS image processing; shrink them in the browser
+  // before upload. Videos pass through.
+  let uploadFile = file;
+  if (kind === "photo") {
+    const shrunk = await shrinkForOSS(file);
+    uploadFile = shrunk.file;
+  }
   const policy = await api.uploadPolicy({
     trip_id: tripId,
-    filename: file.name,
-    mime: file.type,
+    filename: uploadFile.name,
+    mime: uploadFile.type,
     kind,
   }, bearer);
   update(taskID, { status: "uploading", progress: 0.02 });
-  await postToOSS(policy, file, (p) => update(taskID, { progress: p }));
+  await postToOSS(policy, uploadFile, (p) => update(taskID, { progress: p }));
 
   let width: number | undefined,
     height: number | undefined,
     durationMs: number | undefined;
   if (kind === "photo") {
-    const dims = await readImageDimsSafe(file);
+    const dims = await readImageDimsSafe(uploadFile);
     width = dims?.width;
     height = dims?.height;
   } else {
-    const m = await readVideoMetaSafe(file);
+    const m = await readVideoMetaSafe(uploadFile);
     if (m) {
       width = m.width;
       height = m.height;
@@ -308,8 +317,8 @@ async function uploadOne(
     trip_id: tripId,
     oss_key: policy.oss_key,
     kind,
-    mime: file.type,
-    size: file.size,
+    mime: uploadFile.type,
+    size: uploadFile.size,
     width,
     height,
     duration_ms: durationMs,
