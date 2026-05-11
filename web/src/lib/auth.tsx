@@ -8,10 +8,18 @@ import {
 } from "react";
 import { api, getToken, setToken, type User } from "./api";
 
+type LoginResult = {
+  token?: string;
+  expires_at?: string;
+  user?: User;
+  totp_required?: boolean;
+  challenge_token?: string;
+};
+
 type AuthState = {
   user: User | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => void;
   refresh: () => Promise<void>;
   adoptSession: (token: string, user: User) => void;
@@ -46,8 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const r = await api.login(username, password);
-    setToken(r.token);
-    setUser(r.user);
+    // Two-factor: caller has to drive the second step itself; we don't yet
+    // have a session.
+    if (r.totp_required) return r;
+    if (r.token && r.user) {
+      setToken(r.token);
+      setUser(r.user);
+    }
+    return r;
   }, []);
 
   const adoptSession = useCallback((token: string, u: User) => {

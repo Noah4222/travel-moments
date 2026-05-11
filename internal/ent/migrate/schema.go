@@ -510,6 +510,8 @@ var (
 		{Name: "password_hash", Type: field.TypeString},
 		{Name: "role", Type: field.TypeEnum, Enums: []string{"admin", "editor"}},
 		{Name: "disabled", Type: field.TypeBool, Default: false},
+		{Name: "totp_secret", Type: field.TypeString, Nullable: true},
+		{Name: "totp_enabled", Type: field.TypeBool, Default: false},
 	}
 	// UsersTable holds the schema information for the "users" table.
 	UsersTable = &schema.Table{

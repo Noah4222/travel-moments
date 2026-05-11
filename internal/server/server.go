@@ -89,7 +89,12 @@ func New(cfg *config.Config, client *ent.Client, logger *slog.Logger) *echo.Echo
 
 	// Auth
 	api.POST("/auth/login", h.Login)
+	api.POST("/auth/login/totp", h.LoginTOTP)
 	api.GET("/auth/me", h.Me, auth.RequireUser)
+	api.POST("/auth/password", h.ChangePassword, auth.RequireUser)
+	api.POST("/auth/totp/setup", h.SetupTOTP, auth.RequireUser)
+	api.POST("/auth/totp/enable", h.EnableTOTP, auth.RequireUser)
+	api.POST("/auth/totp/disable", h.DisableTOTP, auth.RequireUser)
 
 	// Passkeys (WebAuthn)
 	api.GET("/passkeys", h.ListMyPasskeys, auth.RequireUser)

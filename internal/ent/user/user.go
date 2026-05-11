@@ -27,6 +27,10 @@ const (
 	FieldRole = "role"
 	// FieldDisabled holds the string denoting the disabled field in the database.
 	FieldDisabled = "disabled"
+	// FieldTotpSecret holds the string denoting the totp_secret field in the database.
+	FieldTotpSecret = "totp_secret"
+	// FieldTotpEnabled holds the string denoting the totp_enabled field in the database.
+	FieldTotpEnabled = "totp_enabled"
 	// EdgeCreatedTrips holds the string denoting the created_trips edge name in mutations.
 	EdgeCreatedTrips = "created_trips"
 	// EdgeEditorTrips holds the string denoting the editor_trips edge name in mutations.
@@ -101,6 +105,8 @@ var Columns = []string{
 	FieldPasswordHash,
 	FieldRole,
 	FieldDisabled,
+	FieldTotpSecret,
+	FieldTotpEnabled,
 }
 
 var (
@@ -132,6 +138,8 @@ var (
 	PasswordHashValidator func(string) error
 	// DefaultDisabled holds the default value on creation for the "disabled" field.
 	DefaultDisabled bool
+	// DefaultTotpEnabled holds the default value on creation for the "totp_enabled" field.
+	DefaultTotpEnabled bool
 )
 
 // Role defines the type for the "role" enum field.
@@ -193,6 +201,16 @@ func ByRole(opts ...sql.OrderTermOption) OrderOption {
 // ByDisabled orders the results by the disabled field.
 func ByDisabled(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDisabled, opts...).ToFunc()
+}
+
+// ByTotpSecret orders the results by the totp_secret field.
+func ByTotpSecret(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTotpSecret, opts...).ToFunc()
+}
+
+// ByTotpEnabled orders the results by the totp_enabled field.
+func ByTotpEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTotpEnabled, opts...).ToFunc()
 }
 
 // ByCreatedTripsCount orders the results by created_trips count.

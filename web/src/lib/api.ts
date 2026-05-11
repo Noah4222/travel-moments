@@ -67,6 +67,7 @@ export type User = {
   username: string;
   role: "admin" | "editor";
   disabled: boolean;
+  totp_enabled?: boolean;
   created_at: string;
 };
 
@@ -97,9 +98,11 @@ export type PublicTripSummary = {
 };
 
 export type LoginResp = {
-  token: string;
-  expires_at: string;
-  user: User;
+  token?: string;
+  expires_at?: string;
+  user?: User;
+  totp_required?: boolean;
+  challenge_token?: string;
 };
 
 export type ImgURLs = { avif?: string; webp?: string };
@@ -394,6 +397,23 @@ export const api = {
       "/passkeys/login/finish",
       { method: "POST", body: cred, bearer: null },
     ),
+
+  // ---- password / 2FA ----
+  changePassword: (body: { current_password: string; new_password: string }) =>
+    apiFetch<void>("/auth/password", { method: "POST", body }),
+  loginTOTP: (challenge_token: string, code: string) =>
+    apiFetch<{ token: string; expires_at: string; user: User }>(
+      "/auth/login/totp",
+      { method: "POST", body: { challenge_token, code }, bearer: null },
+    ),
+  totpSetup: () =>
+    apiFetch<{ secret: string; otpauth_uri: string }>("/auth/totp/setup", {
+      method: "POST",
+    }),
+  totpEnable: (code: string) =>
+    apiFetch<void>("/auth/totp/enable", { method: "POST", body: { code } }),
+  totpDisable: (password: string) =>
+    apiFetch<void>("/auth/totp/disable", { method: "POST", body: { password } }),
 };
 
 export type UploadGrant = {

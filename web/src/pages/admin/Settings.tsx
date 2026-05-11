@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type AppSettings, type Passkey } from "@/lib/api";
+import QRCodeLib from "qrcode";
+import { api, type AppSettings, type Passkey, type User } from "@/lib/api";
 import { Button, Card, Input, Label } from "@/components/ui";
 import { ImageProcessEditor } from "@/components/ImageProcessEditor";
 import { isPasskeySupported, registerPasskey } from "@/lib/passkey";
@@ -181,9 +182,262 @@ export function SettingsPage() {
         </h2>
         <p className="-mt-2 text-xs text-zinc-500">
           注册 Passkey 后可以用 Touch ID / Windows Hello / 手机指纹替代密码登录。
+          Passkey 登录默认跳过两步验证。
         </p>
         <PasskeysSection />
       </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+          账号安全
+        </h2>
+        <ChangePasswordSection />
+        <TOTPSection />
+      </section>
+    </div>
+  );
+}
+
+function ChangePasswordSection() {
+  const [cur, setCur] = useState("");
+  const [next, setNext] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      await api.changePassword({ current_password: cur, new_password: next });
+      setMsg("密码已更新");
+      setCur("");
+      setNext("");
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : String(e2));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="space-y-3 p-4">
+      <h3 className="text-sm font-medium">修改密码</h3>
+      <form onSubmit={submit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <Label>当前密码</Label>
+          <Input
+            type="password"
+            autoComplete="current-password"
+            value={cur}
+            onChange={(e) => setCur(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>新密码（至少 8 位）</Label>
+          <Input
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            minLength={8}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          {msg && <p className="mb-2 text-sm text-emerald-600">{msg}</p>}
+          {err && <p className="mb-2 text-sm text-rose-600">{err}</p>}
+          <Button
+            type="submit"
+            disabled={busy || !cur || next.length < 8}
+            size="sm"
+          >
+            {busy ? "保存中…" : "保存新密码"}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+function TOTPSection() {
+  const [me, setMe] = useState<User | null>(null);
+  const [setupData, setSetupData] = useState<{ secret: string; otpauth_uri: string } | null>(null);
+  const [code, setCode] = useState("");
+  const [disablePw, setDisablePw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function reload() {
+    try {
+      setMe(await api.me());
+    } catch {
+      /* ignore */
+    }
+  }
+  useEffect(() => {
+    reload();
+  }, []);
+
+  async function beginSetup() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.totpSetup();
+      setSetupData(r);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmEnable() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.totpEnable(code.trim());
+      setSetupData(null);
+      setCode("");
+      await reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    if (!disablePw) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.totpDisable(disablePw);
+      setDisablePw("");
+      await reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!me) return <Card className="p-4 text-sm text-zinc-500">加载中…</Card>;
+
+  if (me.totp_enabled) {
+    return (
+      <Card className="space-y-3 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">两步验证 (TOTP)</h3>
+          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+            已启用
+          </span>
+        </div>
+        <p className="text-xs text-zinc-500">
+          密码登录时会要求验证器中的 6 位代码。Passkey 登录不需要。
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="password"
+            placeholder="输入当前密码以禁用"
+            value={disablePw}
+            onChange={(e) => setDisablePw(e.target.value)}
+            className="min-w-0 flex-1"
+          />
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={disable}
+            disabled={busy || !disablePw}
+          >
+            {busy ? "处理中…" : "禁用 2FA"}
+          </Button>
+        </div>
+        {err && <p className="text-sm text-rose-600">{err}</p>}
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="space-y-3 p-4">
+      <h3 className="text-sm font-medium">两步验证 (TOTP)</h3>
+      <p className="text-xs text-zinc-500">
+        启用后，密码登录时会增加一步 6 位代码验证（用 Google Authenticator / 1Password / Bitwarden 等都可）。
+      </p>
+      {!setupData ? (
+        <Button size="sm" onClick={beginSetup} disabled={busy}>
+          {busy ? "生成中…" : "启用 2FA"}
+        </Button>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-zinc-500">
+            用验证器扫描下方二维码，或手动添加密钥：
+          </p>
+          <QRCode value={setupData.otpauth_uri} />
+          <div className="rounded bg-zinc-100 p-2 text-center font-mono text-xs dark:bg-zinc-900">
+            {setupData.secret}
+          </div>
+          <div>
+            <Label>验证器中的 6 位代码</Label>
+            <Input
+              inputMode="numeric"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              className="text-center text-lg tracking-widest"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={confirmEnable}
+              disabled={busy || code.length !== 6}
+            >
+              {busy ? "验证中…" : "确认启用"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setSetupData(null);
+                setCode("");
+              }}
+              disabled={busy}
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      )}
+      {err && <p className="text-sm text-rose-600">{err}</p>}
+    </Card>
+  );
+}
+
+function QRCode({ value }: { value: string }) {
+  const [dataURL, setDataURL] = useState<string | null>(null);
+  useEffect(() => {
+    QRCodeLib.toDataURL(value, { width: 220, margin: 1 })
+      .then(setDataURL)
+      .catch(() => setDataURL(null));
+  }, [value]);
+  if (!dataURL) {
+    return (
+      <div className="flex h-[220px] items-center justify-center text-xs text-zinc-400">
+        生成二维码…
+      </div>
+    );
+  }
+  return (
+    <div className="flex justify-center">
+      <img
+        src={dataURL}
+        alt="otpauth QR"
+        width={220}
+        height={220}
+        className="rounded bg-white p-2"
+      />
     </div>
   );
 }

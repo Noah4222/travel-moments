@@ -13309,6 +13309,8 @@ type UserMutation struct {
 	password_hash          *string
 	role                   *user.Role
 	disabled               *bool
+	totp_secret            *string
+	totp_enabled           *bool
 	clearedFields          map[string]struct{}
 	created_trips          map[int]struct{}
 	removedcreated_trips   map[int]struct{}
@@ -13648,6 +13650,91 @@ func (m *UserMutation) OldDisabled(ctx context.Context) (v bool, err error) {
 // ResetDisabled resets all changes to the "disabled" field.
 func (m *UserMutation) ResetDisabled() {
 	m.disabled = nil
+}
+
+// SetTotpSecret sets the "totp_secret" field.
+func (m *UserMutation) SetTotpSecret(s string) {
+	m.totp_secret = &s
+}
+
+// TotpSecret returns the value of the "totp_secret" field in the mutation.
+func (m *UserMutation) TotpSecret() (r string, exists bool) {
+	v := m.totp_secret
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTotpSecret returns the old "totp_secret" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldTotpSecret(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTotpSecret is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTotpSecret requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTotpSecret: %w", err)
+	}
+	return oldValue.TotpSecret, nil
+}
+
+// ClearTotpSecret clears the value of the "totp_secret" field.
+func (m *UserMutation) ClearTotpSecret() {
+	m.totp_secret = nil
+	m.clearedFields[user.FieldTotpSecret] = struct{}{}
+}
+
+// TotpSecretCleared returns if the "totp_secret" field was cleared in this mutation.
+func (m *UserMutation) TotpSecretCleared() bool {
+	_, ok := m.clearedFields[user.FieldTotpSecret]
+	return ok
+}
+
+// ResetTotpSecret resets all changes to the "totp_secret" field.
+func (m *UserMutation) ResetTotpSecret() {
+	m.totp_secret = nil
+	delete(m.clearedFields, user.FieldTotpSecret)
+}
+
+// SetTotpEnabled sets the "totp_enabled" field.
+func (m *UserMutation) SetTotpEnabled(b bool) {
+	m.totp_enabled = &b
+}
+
+// TotpEnabled returns the value of the "totp_enabled" field in the mutation.
+func (m *UserMutation) TotpEnabled() (r bool, exists bool) {
+	v := m.totp_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTotpEnabled returns the old "totp_enabled" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldTotpEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTotpEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTotpEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTotpEnabled: %w", err)
+	}
+	return oldValue.TotpEnabled, nil
+}
+
+// ResetTotpEnabled resets all changes to the "totp_enabled" field.
+func (m *UserMutation) ResetTotpEnabled() {
+	m.totp_enabled = nil
 }
 
 // AddCreatedTripIDs adds the "created_trips" edge to the Trip entity by ids.
@@ -14062,7 +14149,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 6)
+	fields := make([]string, 0, 8)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -14080,6 +14167,12 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.disabled != nil {
 		fields = append(fields, user.FieldDisabled)
+	}
+	if m.totp_secret != nil {
+		fields = append(fields, user.FieldTotpSecret)
+	}
+	if m.totp_enabled != nil {
+		fields = append(fields, user.FieldTotpEnabled)
 	}
 	return fields
 }
@@ -14101,6 +14194,10 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Role()
 	case user.FieldDisabled:
 		return m.Disabled()
+	case user.FieldTotpSecret:
+		return m.TotpSecret()
+	case user.FieldTotpEnabled:
+		return m.TotpEnabled()
 	}
 	return nil, false
 }
@@ -14122,6 +14219,10 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldRole(ctx)
 	case user.FieldDisabled:
 		return m.OldDisabled(ctx)
+	case user.FieldTotpSecret:
+		return m.OldTotpSecret(ctx)
+	case user.FieldTotpEnabled:
+		return m.OldTotpEnabled(ctx)
 	}
 	return nil, fmt.Errorf("unknown User field %s", name)
 }
@@ -14173,6 +14274,20 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetDisabled(v)
 		return nil
+	case user.FieldTotpSecret:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTotpSecret(v)
+		return nil
+	case user.FieldTotpEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTotpEnabled(v)
+		return nil
 	}
 	return fmt.Errorf("unknown User field %s", name)
 }
@@ -14202,7 +14317,11 @@ func (m *UserMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *UserMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(user.FieldTotpSecret) {
+		fields = append(fields, user.FieldTotpSecret)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -14215,6 +14334,11 @@ func (m *UserMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *UserMutation) ClearField(name string) error {
+	switch name {
+	case user.FieldTotpSecret:
+		m.ClearTotpSecret()
+		return nil
+	}
 	return fmt.Errorf("unknown User nullable field %s", name)
 }
 
@@ -14239,6 +14363,12 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldDisabled:
 		m.ResetDisabled()
+		return nil
+	case user.FieldTotpSecret:
+		m.ResetTotpSecret()
+		return nil
+	case user.FieldTotpEnabled:
+		m.ResetTotpEnabled()
 		return nil
 	}
 	return fmt.Errorf("unknown User field %s", name)

@@ -452,6 +452,10 @@ func init() {
 	userDescDisabled := userFields[3].Descriptor()
 	// user.DefaultDisabled holds the default value on creation for the disabled field.
 	user.DefaultDisabled = userDescDisabled.Default.(bool)
+	// userDescTotpEnabled is the schema descriptor for totp_enabled field.
+	userDescTotpEnabled := userFields[5].Descriptor()
+	// user.DefaultTotpEnabled holds the default value on creation for the totp_enabled field.
+	user.DefaultTotpEnabled = userDescTotpEnabled.Default.(bool)
 	usercredentialMixin := schema.UserCredential{}.Mixin()
 	usercredentialMixinFields0 := usercredentialMixin[0].Fields()
 	_ = usercredentialMixinFields0

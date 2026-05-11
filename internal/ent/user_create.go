@@ -88,6 +88,34 @@ func (_c *UserCreate) SetNillableDisabled(v *bool) *UserCreate {
 	return _c
 }
 
+// SetTotpSecret sets the "totp_secret" field.
+func (_c *UserCreate) SetTotpSecret(v string) *UserCreate {
+	_c.mutation.SetTotpSecret(v)
+	return _c
+}
+
+// SetNillableTotpSecret sets the "totp_secret" field if the given value is not nil.
+func (_c *UserCreate) SetNillableTotpSecret(v *string) *UserCreate {
+	if v != nil {
+		_c.SetTotpSecret(*v)
+	}
+	return _c
+}
+
+// SetTotpEnabled sets the "totp_enabled" field.
+func (_c *UserCreate) SetTotpEnabled(v bool) *UserCreate {
+	_c.mutation.SetTotpEnabled(v)
+	return _c
+}
+
+// SetNillableTotpEnabled sets the "totp_enabled" field if the given value is not nil.
+func (_c *UserCreate) SetNillableTotpEnabled(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetTotpEnabled(*v)
+	}
+	return _c
+}
+
 // AddCreatedTripIDs adds the "created_trips" edge to the Trip entity by IDs.
 func (_c *UserCreate) AddCreatedTripIDs(ids ...int) *UserCreate {
 	_c.mutation.AddCreatedTripIDs(ids...)
@@ -240,6 +268,10 @@ func (_c *UserCreate) defaults() {
 		v := user.DefaultDisabled
 		_c.mutation.SetDisabled(v)
 	}
+	if _, ok := _c.mutation.TotpEnabled(); !ok {
+		v := user.DefaultTotpEnabled
+		_c.mutation.SetTotpEnabled(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -276,6 +308,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.Disabled(); !ok {
 		return &ValidationError{Name: "disabled", err: errors.New(`ent: missing required field "User.disabled"`)}
+	}
+	if _, ok := _c.mutation.TotpEnabled(); !ok {
+		return &ValidationError{Name: "totp_enabled", err: errors.New(`ent: missing required field "User.totp_enabled"`)}
 	}
 	return nil
 }
@@ -327,6 +362,14 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Disabled(); ok {
 		_spec.SetField(user.FieldDisabled, field.TypeBool, value)
 		_node.Disabled = value
+	}
+	if value, ok := _c.mutation.TotpSecret(); ok {
+		_spec.SetField(user.FieldTotpSecret, field.TypeString, value)
+		_node.TotpSecret = value
+	}
+	if value, ok := _c.mutation.TotpEnabled(); ok {
+		_spec.SetField(user.FieldTotpEnabled, field.TypeBool, value)
+		_node.TotpEnabled = value
 	}
 	if nodes := _c.mutation.CreatedTripsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -556,6 +599,36 @@ func (u *UserUpsert) UpdateDisabled() *UserUpsert {
 	return u
 }
 
+// SetTotpSecret sets the "totp_secret" field.
+func (u *UserUpsert) SetTotpSecret(v string) *UserUpsert {
+	u.Set(user.FieldTotpSecret, v)
+	return u
+}
+
+// UpdateTotpSecret sets the "totp_secret" field to the value that was provided on create.
+func (u *UserUpsert) UpdateTotpSecret() *UserUpsert {
+	u.SetExcluded(user.FieldTotpSecret)
+	return u
+}
+
+// ClearTotpSecret clears the value of the "totp_secret" field.
+func (u *UserUpsert) ClearTotpSecret() *UserUpsert {
+	u.SetNull(user.FieldTotpSecret)
+	return u
+}
+
+// SetTotpEnabled sets the "totp_enabled" field.
+func (u *UserUpsert) SetTotpEnabled(v bool) *UserUpsert {
+	u.Set(user.FieldTotpEnabled, v)
+	return u
+}
+
+// UpdateTotpEnabled sets the "totp_enabled" field to the value that was provided on create.
+func (u *UserUpsert) UpdateTotpEnabled() *UserUpsert {
+	u.SetExcluded(user.FieldTotpEnabled)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -668,6 +741,41 @@ func (u *UserUpsertOne) SetDisabled(v bool) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateDisabled() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateDisabled()
+	})
+}
+
+// SetTotpSecret sets the "totp_secret" field.
+func (u *UserUpsertOne) SetTotpSecret(v string) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetTotpSecret(v)
+	})
+}
+
+// UpdateTotpSecret sets the "totp_secret" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateTotpSecret() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateTotpSecret()
+	})
+}
+
+// ClearTotpSecret clears the value of the "totp_secret" field.
+func (u *UserUpsertOne) ClearTotpSecret() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearTotpSecret()
+	})
+}
+
+// SetTotpEnabled sets the "totp_enabled" field.
+func (u *UserUpsertOne) SetTotpEnabled(v bool) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetTotpEnabled(v)
+	})
+}
+
+// UpdateTotpEnabled sets the "totp_enabled" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateTotpEnabled() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateTotpEnabled()
 	})
 }
 
@@ -949,6 +1057,41 @@ func (u *UserUpsertBulk) SetDisabled(v bool) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateDisabled() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateDisabled()
+	})
+}
+
+// SetTotpSecret sets the "totp_secret" field.
+func (u *UserUpsertBulk) SetTotpSecret(v string) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetTotpSecret(v)
+	})
+}
+
+// UpdateTotpSecret sets the "totp_secret" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateTotpSecret() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateTotpSecret()
+	})
+}
+
+// ClearTotpSecret clears the value of the "totp_secret" field.
+func (u *UserUpsertBulk) ClearTotpSecret() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearTotpSecret()
+	})
+}
+
+// SetTotpEnabled sets the "totp_enabled" field.
+func (u *UserUpsertBulk) SetTotpEnabled(v bool) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetTotpEnabled(v)
+	})
+}
+
+// UpdateTotpEnabled sets the "totp_enabled" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateTotpEnabled() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateTotpEnabled()
 	})
 }
 

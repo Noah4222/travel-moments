@@ -24,6 +24,43 @@ func NewJWT(secret string, expiresIn time.Duration) *JWT {
 }
 
 const userSubject = "user"
+const challengeSubject = "totp-challenge"
+
+// SignChallenge issues a short-lived token used only as a TOTP challenge
+// handle. It must not be accepted as a normal user session — the Parse method
+// rejects tokens whose subject != "user".
+func (j *JWT) SignChallenge(userID int, ttl time.Duration) (string, error) {
+	now := time.Now()
+	claims := &Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   challengeSubject,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return tok.SignedString(j.secret)
+}
+
+// ParseChallenge validates a TOTP challenge token (must have subject
+// "totp-challenge"), returns the user id it points at.
+func (j *JWT) ParseChallenge(tokenStr string) (*Claims, error) {
+	tok, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return j.secret, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	c, ok := tok.Claims.(*Claims)
+	if !ok || !tok.Valid || c.Subject != challengeSubject {
+		return nil, errors.New("invalid challenge token")
+	}
+	return c, nil
+}
 
 func (j *JWT) Sign(userID int, role string) (string, time.Time, error) {
 	now := time.Now()

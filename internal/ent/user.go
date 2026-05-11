@@ -29,6 +29,10 @@ type User struct {
 	Role user.Role `json:"role,omitempty"`
 	// Disabled holds the value of the "disabled" field.
 	Disabled bool `json:"disabled,omitempty"`
+	// TotpSecret holds the value of the "totp_secret" field.
+	TotpSecret string `json:"-"`
+	// TotpEnabled holds the value of the "totp_enabled" field.
+	TotpEnabled bool `json:"totp_enabled,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the UserQuery when eager-loading is set.
 	Edges        UserEdges `json:"edges"`
@@ -124,11 +128,11 @@ func (*User) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case user.FieldDisabled:
+		case user.FieldDisabled, user.FieldTotpEnabled:
 			values[i] = new(sql.NullBool)
 		case user.FieldID:
 			values[i] = new(sql.NullInt64)
-		case user.FieldUsername, user.FieldPasswordHash, user.FieldRole:
+		case user.FieldUsername, user.FieldPasswordHash, user.FieldRole, user.FieldTotpSecret:
 			values[i] = new(sql.NullString)
 		case user.FieldCreatedAt, user.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -188,6 +192,18 @@ func (_m *User) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field disabled", values[i])
 			} else if value.Valid {
 				_m.Disabled = value.Bool
+			}
+		case user.FieldTotpSecret:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field totp_secret", values[i])
+			} else if value.Valid {
+				_m.TotpSecret = value.String
+			}
+		case user.FieldTotpEnabled:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field totp_enabled", values[i])
+			} else if value.Valid {
+				_m.TotpEnabled = value.Bool
 			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
@@ -276,6 +292,11 @@ func (_m *User) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("disabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Disabled))
+	builder.WriteString(", ")
+	builder.WriteString("totp_secret=<sensitive>")
+	builder.WriteString(", ")
+	builder.WriteString("totp_enabled=")
+	builder.WriteString(fmt.Sprintf("%v", _m.TotpEnabled))
 	builder.WriteByte(')')
 	return builder.String()
 }
