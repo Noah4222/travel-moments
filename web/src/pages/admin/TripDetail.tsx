@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, type Asset, type Trip, type User } from "@/lib/api";
-import { Badge, Button, Card } from "@/components/ui";
+import { Badge, Button, Card, Input } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { UploadDropzone } from "@/components/UploadDropzone";
 import { AssetGrid } from "@/components/AssetGrid";
@@ -11,6 +11,96 @@ import { CommentsPanel } from "@/components/CommentsPanel";
 import { UploadGrantsPanel } from "@/components/UploadGrantsPanel";
 
 type NavigateFn = (to: string) => void;
+
+function EditableTitle({
+  value,
+  editable,
+  onSave,
+}: {
+  value: string;
+  editable: boolean;
+  onSave: (v: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function start() {
+    setDraft(value);
+    setEditing(true);
+    // focus on next tick after the input renders
+    setTimeout(() => inputRef.current?.select(), 0);
+  }
+
+  async function commit() {
+    const next = draft.trim();
+    if (!next || next === value) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSave(next);
+      setEditing(false);
+    } catch (err) {
+      alert("保存失败：" + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onKey(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void commit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setEditing(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={onKey}
+          maxLength={200}
+          className="!h-auto max-w-xl text-2xl font-semibold sm:text-3xl"
+        />
+        <Button size="sm" onClick={commit} disabled={busy || !draft.trim()}>
+          {busy ? "保存中…" : "保存"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={busy}>
+          取消
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <h1 className="break-words text-2xl font-semibold sm:text-3xl">{value}</h1>
+      {editable && (
+        <button
+          type="button"
+          onClick={start}
+          className="rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          aria-label="编辑标题"
+          title="编辑标题"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
 
 function AdminTripActions({
   trip,
@@ -116,9 +206,14 @@ export function TripDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <Badge>{trip.slug}</Badge>
-          <h1 className="mt-2 break-words text-2xl font-semibold sm:text-3xl">
-            {trip.title}
-          </h1>
+          <EditableTitle
+            value={trip.title}
+            editable={isAdmin}
+            onSave={async (v) => {
+              await api.updateTrip(tripId, { title: v });
+              await reload();
+            }}
+          />
           <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-zinc-500">
             <span className="flex items-center gap-1.5">
               📅
