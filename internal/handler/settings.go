@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -66,10 +67,20 @@ func (h *Handler) AdminUpdateSetting(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "key required")
 	}
 	switch req.Key {
-	case settings.KeyURLTTL, settings.KeyURLCacheTTL, settings.KeyAssetShareTTL:
+	case settings.KeyURLTTL,
+		settings.KeyURLCacheTTL,
+		settings.KeyAssetShareTTL,
+		settings.KeyUploadTokenTTL:
 		if req.Value != "" {
 			if _, err := time.ParseDuration(req.Value); err != nil {
 				return echo.NewHTTPError(http.StatusBadRequest, "value must be a duration like 10m / 24h")
+			}
+		}
+	case settings.KeyUploadConcurrency:
+		if req.Value != "" {
+			n, err := strconv.Atoi(req.Value)
+			if err != nil || n < 1 || n > 32 {
+				return echo.NewHTTPError(http.StatusBadRequest, "concurrency must be an integer between 1 and 32")
 			}
 		}
 	case settings.KeyUploadCacheCtl,
