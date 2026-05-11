@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"entgo.io/ent/dialect/sql"
 	"github.com/labstack/echo/v4"
 
 	"github.com/cloverstd/travel-moments/internal/auth"
@@ -56,7 +57,12 @@ func (h *Handler) ListTrips(c echo.Context) error {
 	claims := auth.MustClaims(c)
 	q := h.DB.Trip.Query().
 		WithEditors(func(uq *ent.UserQuery) { uq.Select(user.FieldID) }).
-		Order(ent.Desc(trip.FieldCreatedAt))
+		Order(func(s *sql.Selector) {
+			// Newest-first by the user-set started_at; fall back to
+			// created_at so trips without a date don't get stuck on top.
+			s.OrderBy("COALESCE(" + s.C(trip.FieldStartedAt) + ", " +
+				s.C(trip.FieldCreatedAt) + ") DESC")
+		}, ent.Desc(trip.FieldID))
 	if claims.Role == auth.RoleEditor {
 		q = q.Where(trip.HasEditorsWith(user.IDEQ(claims.UserID)))
 	}

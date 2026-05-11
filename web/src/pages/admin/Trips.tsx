@@ -78,8 +78,8 @@ export function TripsPage() {
                     <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
                       <span className="rounded bg-black/40 px-2 py-0.5">{t.slug}</span>
                       {t.location && <span>📍 {t.location}</span>}
-                      <span className="text-white/70">
-                        {new Date(t.created_at).toLocaleDateString()}
+                      <span className="text-white/85">
+                        📅 {new Date(t.started_at ?? t.created_at).toLocaleDateString()}
                       </span>
                     </div>
                     <h2 className="text-xl font-semibold drop-shadow-md sm:text-2xl">
@@ -110,6 +110,7 @@ function CreateTripForm({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
+  const [date, setDate] = useState(""); // YYYY-MM-DD
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,7 +119,13 @@ function CreateTripForm({ onCreated }: { onCreated: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await api.createTrip({ slug, title, description, location });
+      await api.createTrip({
+        slug,
+        title,
+        description,
+        location,
+        started_at: date ? new Date(date + "T00:00:00").toISOString() : undefined,
+      });
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -148,7 +155,15 @@ function CreateTripForm({ onCreated }: { onCreated: () => void }) {
             required
           />
         </div>
-        <div className="sm:col-span-2">
+        <div>
+          <Label>日期</Label>
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </div>
+        <div>
           <Label>地点</Label>
           <Input
             value={location}

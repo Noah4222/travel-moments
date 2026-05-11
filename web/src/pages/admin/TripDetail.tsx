@@ -119,9 +119,32 @@ export function TripDetailPage() {
           <h1 className="mt-2 break-words text-2xl font-semibold sm:text-3xl">
             {trip.title}
           </h1>
-          {trip.location && (
-            <p className="mt-1 text-sm text-zinc-500">📍 {trip.location}</p>
-          )}
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-zinc-500">
+            <span className="flex items-center gap-1.5">
+              📅
+              {isAdmin ? (
+                <input
+                  type="date"
+                  defaultValue={trip.started_at ? trip.started_at.slice(0, 10) : ""}
+                  onBlur={async (e) => {
+                    const v = e.target.value;
+                    await api.updateTrip(tripId, {
+                      started_at: v ? new Date(v + "T00:00:00").toISOString() : undefined,
+                    });
+                    await reload();
+                  }}
+                  className="rounded border border-zinc-300 bg-transparent px-2 py-0.5 text-sm dark:border-zinc-700"
+                />
+              ) : (
+                <span>
+                  {trip.started_at
+                    ? new Date(trip.started_at).toLocaleDateString()
+                    : "未设置"}
+                </span>
+              )}
+            </span>
+            {trip.location && <span>📍 {trip.location}</span>}
+          </div>
           {trip.description && (
             <p className="mt-3 max-w-2xl text-sm text-zinc-600 sm:text-base dark:text-zinc-400">
               {trip.description}
