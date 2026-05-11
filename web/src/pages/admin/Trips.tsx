@@ -1,10 +1,30 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, type Trip } from "@/lib/api";
 import { Button, Card, Input, Label, Textarea } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { PicturePreview } from "@/components/PicturePreview";
 import { MultiShareDialog } from "@/components/MultiShareDialog";
+
+type Group = { key: string; year: number; month: number; trips: Trip[] };
+
+function groupByMonth(trips: Trip[]): Group[] {
+  const buckets = new Map<string, Group>();
+  for (const t of trips) {
+    const d = new Date(t.started_at ?? t.created_at);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    let g = buckets.get(key);
+    if (!g) {
+      g = { key, year, month, trips: [] };
+      buckets.set(key, g);
+    }
+    g.trips.push(t);
+  }
+  // Backend already orders newest first; sort group keys descending too.
+  return Array.from(buckets.values()).sort((a, b) => b.key.localeCompare(a.key));
+}
 
 export function TripsPage() {
   const { user } = useAuth();
@@ -63,44 +83,68 @@ export function TripsPage() {
       {trips.length === 0 ? (
         <Card className="p-8 text-center text-sm text-zinc-500">还没有旅程</Card>
       ) : (
-        <div className="space-y-5">
-          {trips.map((t) => (
-            <Link key={t.id} to={`/admin/trips/${t.id}`} className="block">
-              <Card className="overflow-hidden transition hover:shadow-lg">
-                <div className="relative aspect-[16/9] bg-zinc-100 sm:aspect-[21/9] dark:bg-zinc-900">
-                  <PicturePreview
-                    urls={t.cover_url}
-                    className="h-full w-full object-cover"
-                    loading="eager"
-                  />
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                  <div className="absolute bottom-0 left-0 right-0 p-4 text-white sm:p-5">
-                    <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
-                      <span className="rounded bg-black/40 px-2 py-0.5">{t.slug}</span>
-                      {t.location && <span>📍 {t.location}</span>}
-                      <span className="text-white/85">
-                        📅 {new Date(t.started_at ?? t.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
-                    <h2 className="text-xl font-semibold drop-shadow-md sm:text-2xl">
-                      {t.title}
-                    </h2>
-                    {t.description && (
-                      <p className="mt-1 line-clamp-2 text-xs text-white/85 sm:text-sm">
-                        {t.description}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            </Link>
-          ))}
-        </div>
+        <TripsTimeline trips={trips} />
       )}
 
       {showMulti && (
         <MultiShareDialog trips={trips} onClose={() => setShowMulti(false)} />
       )}
+    </div>
+  );
+}
+
+function TripsTimeline({ trips }: { trips: Trip[] }) {
+  const groups = useMemo(() => groupByMonth(trips), [trips]);
+  return (
+    <div className="space-y-8">
+      {groups.map((g) => (
+        <section key={g.key} className="space-y-3">
+          <div className="sticky top-14 z-10 -mx-3 flex items-baseline gap-3 border-b border-zinc-200 bg-zinc-50/85 px-3 py-2 backdrop-blur sm:-mx-4 sm:px-4 dark:border-zinc-800 dark:bg-zinc-950/85">
+            <h2 className="text-lg font-semibold tracking-tight sm:text-xl">
+              {g.year} 年 {g.month} 月
+            </h2>
+            <span className="text-xs text-zinc-500">{g.trips.length} 个相册</span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {g.trips.map((t) => (
+              <Link
+                key={t.id}
+                to={`/admin/trips/${t.id}`}
+                className="block"
+              >
+                <Card className="overflow-hidden transition hover:shadow-lg">
+                  <div className="relative aspect-[16/9] bg-zinc-100 dark:bg-zinc-900">
+                    <PicturePreview
+                      urls={t.cover_url}
+                      className="h-full w-full object-cover"
+                      loading="eager"
+                    />
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 p-3 text-white sm:p-4">
+                      <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="rounded bg-black/40 px-2 py-0.5">{t.slug}</span>
+                        {t.location && <span>📍 {t.location}</span>}
+                        <span className="text-white/85">
+                          📅 {new Date(t.started_at ?? t.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-semibold drop-shadow-md sm:text-xl">
+                        {t.title}
+                      </h3>
+                      {t.description && (
+                        <p className="mt-1 line-clamp-2 text-xs text-white/85">
+                          {t.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
