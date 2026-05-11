@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+} from "react";
 import { api, type UploadPolicy } from "@/lib/api";
 import { shrinkForOSS } from "@/lib/imageCompress";
+import { Button } from "./ui";
+import { cn } from "@/lib/cn";
 
 /**
  * Run `fn` over `items` with at most `n` running at a time. Errors thrown
@@ -27,8 +37,6 @@ async function withConcurrency<T>(
   });
   await Promise.all(workers);
 }
-import { Button } from "./ui";
-import { cn } from "@/lib/cn";
 
 type Group = {
   photo?: File;
@@ -43,6 +51,9 @@ type Task = {
   status: "pending" | "uploading" | "registering" | "done" | "error";
   error?: string;
   livePhoto: boolean;
+  thumbURL?: string;        // blob: URL for preview (revoked on unmount)
+  isVideo: boolean;
+  group: Group;             // original file refs, kept for retry
 };
 
 function basename(name: string) {
@@ -93,6 +104,29 @@ function groupFiles(files: File[]): Group[] {
   return groups;
 }
 
+function makeTask(g: Group): Task {
+  const main = g.photo ?? g.video!;
+  const isVideo = !!g.video;
+  const label = (g.photo?.name ?? g.video?.name ?? "") +
+    (g.motion ? " ⚡ (Live Photo)" : "");
+  let thumbURL: string | undefined;
+  // Photo: blob URL works directly. Video: blob URL on <video> with
+  // preload=metadata also works as poster.
+  if (main && (main.type.startsWith("image/") || main.type.startsWith("video/"))) {
+    thumbURL = URL.createObjectURL(main);
+  }
+  return {
+    id: uuid(),
+    label,
+    progress: 0,
+    status: "pending",
+    livePhoto: !!(g.photo && g.motion),
+    thumbURL,
+    isVideo,
+    group: g,
+  };
+}
+
 export function UploadDropzone({
   tripId,
   onUploaded,
@@ -104,6 +138,9 @@ export function UploadDropzone({
   bearer?: string;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const tasksRef = useRef<Task[]>([]);
+  tasksRef.current = tasks;
+
   const [dragOver, setDragOver] = useState(false);
   const [concurrency, setConcurrency] = useState(5);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -116,39 +153,71 @@ export function UploadDropzone({
     });
   }, []);
 
+  // Revoke blob URLs on unmount.
+  useEffect(() => {
+    return () => {
+      for (const t of tasksRef.current) {
+        if (t.thumbURL) URL.revokeObjectURL(t.thumbURL);
+      }
+    };
+  }, []);
+
   const updateTask = useCallback((id: string, patch: Partial<Task>) => {
     setTasks((cur) => cur.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }, []);
 
+  const runTask = useCallback(
+    async (t: Task) => {
+      try {
+        await uploadGroup(tripId, t.group, t.id, updateTask, bearer);
+        onUploaded();
+      } catch (err) {
+        updateTask(t.id, {
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [tripId, updateTask, onUploaded, bearer],
+  );
+
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
       const groups = groupFiles(Array.from(files));
-      const newTasks: Task[] = groups.map((g) => ({
-        id: uuid(),
-        label:
-          g.photo
-            ? g.photo.name + (g.motion ? " ⚡ (Live Photo)" : "")
-            : g.video!.name,
-        progress: 0,
-        status: "pending",
-        livePhoto: !!(g.photo && g.motion),
-      }));
+      const newTasks = groups.map(makeTask);
       setTasks((cur) => [...cur, ...newTasks]);
-      await withConcurrency(groups, concurrency, async (g, i) => {
-        const t = newTasks[i];
-        try {
-          await uploadGroup(tripId, g, t.id, updateTask, bearer);
-          onUploaded();
-        } catch (err) {
-          updateTask(t.id, {
-            status: "error",
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      });
+      await withConcurrency(newTasks, concurrency, runTask);
     },
-    [tripId, updateTask, onUploaded, bearer, concurrency],
+    [concurrency, runTask],
   );
+
+  const retryOne = useCallback(
+    (id: string) => {
+      const t = tasksRef.current.find((x) => x.id === id);
+      if (!t) return;
+      updateTask(id, { status: "pending", progress: 0, error: undefined });
+      void runTask({ ...t, status: "pending", progress: 0, error: undefined });
+    },
+    [runTask, updateTask],
+  );
+
+  const retryAllFailed = useCallback(() => {
+    const failed = tasksRef.current.filter((t) => t.status === "error");
+    if (failed.length === 0) return;
+    failed.forEach((t) =>
+      updateTask(t.id, { status: "pending", progress: 0, error: undefined }),
+    );
+    void withConcurrency(failed, concurrency, runTask);
+  }, [concurrency, runTask, updateTask]);
+
+  const clearDone = useCallback(() => {
+    setTasks((cur) => {
+      for (const t of cur) {
+        if (t.status === "done" && t.thumbURL) URL.revokeObjectURL(t.thumbURL);
+      }
+      return cur.filter((t) => t.status !== "done");
+    });
+  }, []);
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -159,6 +228,16 @@ export function UploadDropzone({
     if (e.target.files) handleFiles(e.target.files);
     if (inputRef.current) inputRef.current.value = "";
   }
+
+  const counts = useMemo(() => {
+    let done = 0, error = 0, pending = 0;
+    for (const t of tasks) {
+      if (t.status === "done") done++;
+      else if (t.status === "error") error++;
+      else pending++;
+    }
+    return { done, error, pending, total: tasks.length };
+  }, [tasks]);
 
   return (
     <div className="space-y-3">
@@ -190,38 +269,136 @@ export function UploadDropzone({
       </div>
 
       {tasks.length > 0 && (
-        <ul className="space-y-1.5">
-          {tasks.map((t) => (
-            <li key={t.id} className="flex items-center gap-3 text-sm">
-              <span className="flex-1 truncate">{t.label}</span>
-              <div className="h-1.5 w-32 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div
-                  className={cn(
-                    "h-full transition-all",
-                    t.status === "error"
-                      ? "bg-rose-500"
-                      : t.status === "done"
-                        ? "bg-emerald-500"
-                        : "bg-zinc-700 dark:bg-zinc-300",
-                  )}
-                  style={{ width: `${Math.round(t.progress * 100)}%` }}
-                />
-              </div>
-              <span className="w-20 shrink-0 text-right text-xs text-zinc-500">
-                {statusLabel(t)}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+            <span>
+              共 {counts.total} 项 · 完成 {counts.done}
+              {counts.error > 0 && (
+                <span className="ml-1 text-rose-600">· 失败 {counts.error}</span>
+              )}
+              {counts.pending > 0 && <span className="ml-1">· 进行中 {counts.pending}</span>}
+            </span>
+            <div className="flex gap-1.5">
+              {counts.error > 0 && (
+                <Button size="sm" variant="outline" onClick={retryAllFailed}>
+                  重试所有失败 ({counts.error})
+                </Button>
+              )}
+              {counts.done > 0 && (
+                <Button size="sm" variant="ghost" onClick={clearDone}>
+                  清除已完成
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <ul className="space-y-2">
+            {tasks.map((t) => (
+              <UploadRow key={t.id} task={t} onRetry={() => retryOne(t.id)} />
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
 }
 
+function UploadRow({ task, onRetry }: { task: Task; onRetry: () => void }) {
+  const tone =
+    task.status === "error"
+      ? "bg-rose-500"
+      : task.status === "done"
+        ? "bg-emerald-500"
+        : "bg-zinc-700 dark:bg-zinc-300";
+  return (
+    <li
+      className={cn(
+        "flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-2 text-sm dark:border-zinc-800 dark:bg-zinc-950",
+        task.status === "error" && "border-rose-300 dark:border-rose-900",
+        task.status === "done" && "border-emerald-300 dark:border-emerald-900/50",
+      )}
+    >
+      <Thumbnail task={task} />
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-baseline gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm" title={task.label}>
+            {task.label}
+          </span>
+          <span className="shrink-0 text-xs text-zinc-500">
+            {statusLabel(task)}
+          </span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+          <div
+            className={cn("h-full transition-all", tone)}
+            style={{ width: `${Math.round(task.progress * 100)}%` }}
+          />
+        </div>
+        {task.status === "error" && task.error && (
+          <p className="break-words text-xs text-rose-600" title={task.error}>
+            {task.error.slice(0, 200)}
+          </p>
+        )}
+      </div>
+      {task.status === "error" && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="shrink-0 rounded-md border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40"
+        >
+          重试
+        </button>
+      )}
+    </li>
+  );
+}
+
+function Thumbnail({ task }: { task: Task }) {
+  const size = "h-12 w-12";
+  if (!task.thumbURL) {
+    return (
+      <div
+        className={cn(
+          size,
+          "flex shrink-0 items-center justify-center rounded-md bg-zinc-100 text-xs text-zinc-400 dark:bg-zinc-800",
+        )}
+      >
+        {task.isVideo ? "🎬" : "📄"}
+      </div>
+    );
+  }
+  if (task.isVideo) {
+    return (
+      <div className={cn(size, "relative shrink-0 overflow-hidden rounded-md bg-black")}>
+        <video
+          src={task.thumbURL}
+          muted
+          playsInline
+          preload="metadata"
+          className="h-full w-full object-cover"
+        />
+        <span className="absolute bottom-0 right-0 rounded-tl bg-black/60 px-1 text-[10px] text-white">
+          ▶
+        </span>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={task.thumbURL}
+      alt=""
+      className={cn(
+        size,
+        "shrink-0 rounded-md object-cover ring-1 ring-zinc-200 dark:ring-zinc-800",
+      )}
+    />
+  );
+}
+
 function statusLabel(t: Task) {
-  if (t.status === "error") return t.error ?? "失败";
+  if (t.status === "error") return "失败";
   if (t.status === "done") return "完成";
-  if (t.status === "registering") return "登记中";
+  if (t.status === "registering") return "登记中…";
   if (t.status === "uploading") return `${Math.round(t.progress * 100)}%`;
   return "等待";
 }
