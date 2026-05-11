@@ -95,6 +95,8 @@ export type PublicTripSummary = {
   description?: string;
   cover_url?: ImgURLs;
   asset_count: number;
+  started_at?: string;
+  created_at: string;
 };
 
 export type LoginResp = {

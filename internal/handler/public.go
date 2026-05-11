@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"entgo.io/ent/dialect/sql"
 	"github.com/labstack/echo/v4"
 
 	"github.com/cloverstd/travel-moments/internal/auth"
@@ -16,6 +17,7 @@ import (
 	"github.com/cloverstd/travel-moments/internal/ent/collectionasset"
 	"github.com/cloverstd/travel-moments/internal/ent/sharelink"
 	"github.com/cloverstd/travel-moments/internal/ent/sharetrip"
+	"github.com/cloverstd/travel-moments/internal/ent/trip"
 	"github.com/cloverstd/travel-moments/internal/ent/visit"
 	"github.com/cloverstd/travel-moments/internal/oss"
 )
@@ -35,12 +37,14 @@ type publicScopeResp struct {
 }
 
 type publicTrip struct {
-	ID          int      `json:"id"`
-	Title       string   `json:"title"`
-	Location    string   `json:"location,omitempty"`
-	Description string   `json:"description,omitempty"`
-	CoverURL    *imgURLs `json:"cover_url,omitempty"`
-	AssetCount  int      `json:"asset_count"`
+	ID          int        `json:"id"`
+	Title       string     `json:"title"`
+	Location    string     `json:"location,omitempty"`
+	Description string     `json:"description,omitempty"`
+	CoverURL    *imgURLs   `json:"cover_url,omitempty"`
+	AssetCount  int        `json:"asset_count"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 type publicAsset struct {
@@ -216,19 +220,32 @@ func (h *Handler) PublicTripScope(c echo.Context) error {
 }
 
 func (h *Handler) multiSharedTrips(ctx context.Context, shareID int) ([]publicTrip, error) {
-	rows, err := h.DB.ShareTrip.Query().
+	// Find which trips this share includes.
+	tripIDs, err := h.DB.ShareTrip.Query().
 		Where(sharetrip.ShareIDEQ(shareID)).
-		Order(ent.Asc(sharetrip.FieldSortOrder), ent.Asc(sharetrip.FieldID)).
+		Select(sharetrip.FieldTripID).
+		Ints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(tripIDs) == 0 {
+		return []publicTrip{}, nil
+	}
+	// Order by the trip's own date (same rule as the admin list:
+	// COALESCE(started_at, created_at) DESC). The ShareTrip.sort_order
+	// is ignored on purpose — visitors expect to see albums chronologically.
+	trips, err := h.DB.Trip.Query().
+		Where(trip.IDIn(tripIDs...)).
+		Order(func(s *sql.Selector) {
+			s.OrderBy("COALESCE(" + s.C(trip.FieldStartedAt) + ", " +
+				s.C(trip.FieldCreatedAt) + ") DESC")
+		}, ent.Desc(trip.FieldID)).
 		All(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]publicTrip, 0, len(rows))
-	for _, r := range rows {
-		t, err := h.DB.Trip.Get(ctx, r.TripID)
-		if err != nil {
-			continue
-		}
+	out := make([]publicTrip, 0, len(trips))
+	for _, t := range trips {
 		count, _ := h.DB.Asset.Query().Where(asset.TripIDEQ(t.ID)).Count(ctx)
 		pt := publicTrip{
 			ID:          t.ID,
@@ -236,6 +253,8 @@ func (h *Handler) multiSharedTrips(ctx context.Context, shareID int) ([]publicTr
 			Location:    t.Location,
 			Description: t.Description,
 			AssetCount:  count,
+			StartedAt:   t.StartedAt,
+			CreatedAt:   t.CreatedAt,
 		}
 		if t.CoverAssetID != nil && h.OSS != nil && h.SignedURLs != nil && h.Settings != nil {
 			if a, err := h.DB.Asset.Get(ctx, *t.CoverAssetID); err == nil {

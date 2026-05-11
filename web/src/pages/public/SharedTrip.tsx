@@ -183,6 +183,26 @@ export function SharedTripPage() {
   );
 }
 
+type MonthGroup = { key: string; year: number; month: number; trips: PublicTripSummary[] };
+
+function groupByMonth(trips: PublicTripSummary[]): MonthGroup[] {
+  const buckets = new Map<string, MonthGroup>();
+  for (const t of trips) {
+    const d = new Date(t.started_at ?? t.created_at);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    let g = buckets.get(key);
+    if (!g) {
+      g = { key, year, month, trips: [] };
+      buckets.set(key, g);
+    }
+    g.trips.push(t);
+  }
+  // Backend already orders newest first; sort group keys descending too.
+  return Array.from(buckets.values()).sort((a, b) => b.key.localeCompare(a.key));
+}
+
 function TripListView({
   trips,
   onOpen,
@@ -193,41 +213,55 @@ function TripListView({
   if (trips.length === 0) {
     return <Card className="p-8 text-center text-sm text-zinc-500">没有相册</Card>;
   }
+  const groups = groupByMonth(trips);
   return (
-    <ul className="space-y-5">
-      {trips.map((t) => (
-        <li key={t.id}>
-          <button
-            type="button"
-            onClick={() => onOpen(t.id)}
-            className="block w-full text-left"
-          >
-            <Card className="overflow-hidden transition hover:shadow-lg">
-              <div className="relative aspect-[21/9] bg-zinc-100 dark:bg-zinc-900">
-                <PicturePreview
-                  urls={t.cover_url}
-                  className="h-full w-full object-cover"
-                  loading="eager"
-                />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                <div className="absolute bottom-0 left-0 right-0 p-5 text-white">
-                  <div className="mb-1 flex items-center gap-2 text-xs text-white/80">
-                    {t.location && <span>📍 {t.location}</span>}
-                    <span>{t.asset_count} 张内容</span>
-                  </div>
-                  <h2 className="text-2xl font-semibold drop-shadow-md">{t.title}</h2>
-                  {t.description && (
-                    <p className="mt-1 line-clamp-2 text-sm text-white/85">
-                      {t.description}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </Card>
-          </button>
-        </li>
+    <div className="space-y-7">
+      {groups.map((g) => (
+        <section key={g.key} className="space-y-3">
+          <div className="sticky top-14 z-10 -mx-3 flex items-baseline gap-3 border-b border-zinc-200 bg-zinc-50/85 px-3 py-2 backdrop-blur sm:-mx-4 sm:px-4 dark:border-zinc-800 dark:bg-zinc-950/85">
+            <h2 className="text-base font-semibold tracking-tight sm:text-lg">
+              {g.year} 年 {g.month} 月
+            </h2>
+            <span className="text-xs text-zinc-500">{g.trips.length} 个相册</span>
+          </div>
+          <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {g.trips.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpen(t.id)}
+                  className="block w-full text-left"
+                >
+                  <Card className="overflow-hidden transition hover:shadow-lg">
+                    <div className="relative aspect-[16/9] bg-zinc-100 dark:bg-zinc-900">
+                      <PicturePreview
+                        urls={t.cover_url}
+                        className="h-full w-full object-cover"
+                        loading="eager"
+                      />
+                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                      <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
+                        <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-white/85">
+                          {t.location && <span>📍 {t.location}</span>}
+                          <span>📅 {new Date(t.started_at ?? t.created_at).toLocaleDateString()}</span>
+                          <span>{t.asset_count} 张内容</span>
+                        </div>
+                        <h3 className="text-xl font-semibold drop-shadow-md">{t.title}</h3>
+                        {t.description && (
+                          <p className="mt-1 line-clamp-2 text-xs text-white/85 sm:text-sm">
+                            {t.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       ))}
-    </ul>
+    </div>
   );
 }
 
