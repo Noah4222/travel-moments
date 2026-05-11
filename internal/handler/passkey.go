@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -216,8 +217,17 @@ func (h *Handler) PasskeyRegisterStart(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	options, sessionData, err := h.WebAuthn.BeginRegistration(wu)
+	// Ask the authenticator to produce a resident (discoverable) credential so
+	// users can later sign in without typing a username. UV "preferred" lets
+	// the platform skip biometrics on devices that don't support it.
+	options, sessionData, err := h.WebAuthn.BeginRegistration(wu,
+		webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
+			ResidentKey:      protocol.ResidentKeyRequirementPreferred,
+			UserVerification: protocol.VerificationPreferred,
+		}),
+	)
 	if err != nil {
+		slog.Default().Error("BeginRegistration", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	var name string
@@ -259,10 +269,12 @@ func (h *Handler) PasskeyRegisterFinish(c echo.Context) error {
 	}
 	parsed, err := protocol.ParseCredentialCreationResponse(c.Request())
 	if err != nil {
+		slog.Default().Error("ParseCredentialCreationResponse", "err", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	cred, err := h.WebAuthn.CreateCredential(wu, sess.Data, parsed)
 	if err != nil {
+		slog.Default().Error("CreateCredential", "err", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	transports := make([]string, 0, len(cred.Transport))
@@ -346,6 +358,7 @@ func (h *Handler) PasskeyLoginFinish(c echo.Context) error {
 	clearPasskeyCookie(c)
 	parsed, err := protocol.ParseCredentialRequestResponse(c.Request())
 	if err != nil {
+		slog.Default().Error("ParseCredentialRequestResponse", "err", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
@@ -362,19 +375,35 @@ func (h *Handler) PasskeyLoginFinish(c echo.Context) error {
 		}
 		cred, err = h.WebAuthn.ValidateLogin(wu, sess.Data, parsed)
 		if err != nil {
+			slog.Default().Error("ValidateLogin failed",
+				"user_id", u.ID,
+				"creds_stored", len(wu.creds),
+				"err", err)
 			return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
 		}
 	} else {
 		cred, err = h.WebAuthn.ValidateDiscoverableLogin(func(rawID, userHandle []byte) (webauthn.User, error) {
+			slog.Default().Info("discoverable login lookup",
+				"raw_id_len", len(rawID),
+				"user_handle_len", len(userHandle),
+				"user_handle", base64.RawURLEncoding.EncodeToString(userHandle))
+			if len(userHandle) == 0 {
+				return nil, errors.New("empty userHandle; the passkey was not registered as resident, sign in with username instead")
+			}
 			uid := bytesToID(userHandle)
+			if uid <= 0 {
+				return nil, errors.New("invalid user handle")
+			}
 			uu, err := h.DB.User.Get(c.Request().Context(), uid)
 			if err != nil {
+				slog.Default().Error("user not found", "uid", uid, "err", err)
 				return nil, err
 			}
 			u = uu
 			return h.loadWAUser(c, uu)
 		}, sess.Data, parsed)
 		if err != nil {
+			slog.Default().Error("ValidateDiscoverableLogin failed", "err", err)
 			return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
 		}
 	}

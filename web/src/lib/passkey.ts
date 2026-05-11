@@ -79,11 +79,19 @@ export function isPasskeySupported(): boolean {
 
 export async function registerPasskey(name?: string): Promise<void> {
   const opts = (await api.passkeyRegisterStart(name)) as any;
+  console.debug("[passkey] register/start ->", opts);
   const publicKey = preparePublicKey(opts.publicKey ?? opts);
-  const cred = (await navigator.credentials.create({
-    publicKey,
-  })) as PublicKeyCredential | null;
+  let cred: PublicKeyCredential | null;
+  try {
+    cred = (await navigator.credentials.create({
+      publicKey,
+    })) as PublicKeyCredential | null;
+  } catch (e) {
+    console.error("[passkey] navigator.credentials.create rejected:", e);
+    throw e;
+  }
   if (!cred) throw new Error("Passkey 注册被取消");
+  console.debug("[passkey] got attestation, finishing");
   await api.passkeyRegisterFinish(credentialToJSON(cred));
 }
 
@@ -92,10 +100,18 @@ export async function loginWithPasskey(username?: string): Promise<{
   user: { id: number; username: string; role: string };
 }> {
   const opts = (await api.passkeyLoginStart(username)) as any;
+  console.debug("[passkey] login/start ->", opts);
   const publicKey = preparePublicKey(opts.publicKey ?? opts);
-  const cred = (await navigator.credentials.get({
-    publicKey,
-  })) as PublicKeyCredential | null;
+  let cred: PublicKeyCredential | null;
+  try {
+    cred = (await navigator.credentials.get({
+      publicKey,
+    })) as PublicKeyCredential | null;
+  } catch (e) {
+    console.error("[passkey] navigator.credentials.get rejected:", e);
+    throw e;
+  }
   if (!cred) throw new Error("Passkey 登录被取消");
+  console.debug("[passkey] got assertion, finishing");
   return api.passkeyLoginFinish(credentialToJSON(cred));
 }
