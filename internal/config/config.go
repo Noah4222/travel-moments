@@ -9,8 +9,9 @@ import (
 
 type Config struct {
 	HTTPAddr      string
-	PublicBaseURL string // e.g. https://moments.example.com — for WebAuthn RP
-	SiteName      string // e.g. Travel Moments — shown in passkey prompt
+	PublicBaseURL        string // e.g. https://moments.example.com — for WebAuthn RP
+	SiteName             string // e.g. Travel Moments — shown in passkey prompt
+	WebAuthnExtraOrigins string // comma-separated additional WebAuthn RP origins
 
 	DatabaseURL string
 
@@ -55,8 +56,9 @@ type OSSConfig struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		HTTPAddr:          env("HTTP_ADDR", ":8080"),
-		PublicBaseURL:     env("PUBLIC_BASE_URL", ""),
-		SiteName:          env("SITE_NAME", "Travel Moments"),
+		PublicBaseURL:        env("PUBLIC_BASE_URL", ""),
+		SiteName:             env("SITE_NAME", "Travel Moments"),
+		WebAuthnExtraOrigins: env("WEBAUTHN_EXTRA_ORIGINS", ""),
 		DatabaseURL:       env("DATABASE_URL", "postgres://postgres:postgres@127.0.0.1:5432/travel_moments?sslmode=disable"),
 		JWTSecret:         env("JWT_SECRET", "dev-secret-change-me"),
 		JWTExpiresIn:      envDuration("JWT_EXPIRES_IN", 24*time.Hour),
