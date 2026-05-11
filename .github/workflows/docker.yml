@@ -16,6 +16,14 @@ permissions:
   contents: read
   packages: write
 
+# Cancel any in-flight build on the same branch / PR when a new commit
+# lands — saves runner minutes and we only care about the newest image
+# anyway. Tag pushes always carry their own ref so they don't cancel each
+# other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
