@@ -19,6 +19,12 @@ const (
 	VariantCoverAVIF      Variant = "cover_avif"   // album cover, high quality
 	VariantVideoCoverWebP Variant = "vcover_webp"  // video snapshot webp
 	VariantVideoCoverAVIF Variant = "vcover_avif"  // video snapshot avif
+
+	// Full-resolution re-encodes — same pixels as the source, just transcoded
+	// to a smaller container. Useful as "high-quality preview" buttons in the
+	// lightbox without downloading the raw original.
+	VariantFullWebP Variant = "full_webp"
+	VariantFullAVIF Variant = "full_avif"
 )
 
 // ImageProcess returns the OSS image-processing parameter for the variant, or
@@ -41,6 +47,10 @@ func ImageProcess(v Variant) string {
 		return "video/snapshot,t_1000,f_jpg,w_960"
 	case VariantVideoCoverAVIF:
 		return "video/snapshot,t_1000,f_jpg,w_960"
+	case VariantFullWebP:
+		return "image/quality,q_90/format,webp"
+	case VariantFullAVIF:
+		return "image/quality,q_80/format,avif"
 	}
 	return ""
 }

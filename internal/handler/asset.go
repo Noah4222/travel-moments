@@ -287,6 +287,39 @@ func (h *Handler) ensureTripWriteAccess(c echo.Context, id int) error {
 	return h.ensureTripAccess(c, id)
 }
 
+// ---- Admin URL signer (no view counting) ----
+//
+//	GET /api/assets/:id/url?variant=preview|full_webp|full_avif|original|video|motion
+//
+// Mirrors the public variant set but for logged-in users with trip access;
+// crucially does NOT write an AssetView row.
+func (h *Handler) AdminAssetURL(c echo.Context) error {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "bad id")
+	}
+	a, err := h.DB.Asset.Get(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "asset not found")
+	}
+	if err := h.ensureTripAccess(c, a.TripID); err != nil {
+		return err
+	}
+	variant := c.QueryParam("variant")
+	if variant == "" {
+		variant = "preview"
+	}
+	url, _, err := h.signPublicVariant(a, variant)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"url":        url,
+		"variant":    variant,
+		"hls_status": string(a.HlsStatus),
+	})
+}
+
 // ---- Admin EXIF (admin/editor with trip access) ----
 
 func (h *Handler) AdminAssetEXIF(c echo.Context) error {

@@ -88,6 +88,16 @@ export type Trip = {
   editor_user_ids?: number[];
 };
 
+export type AssetURLVariant =
+  | "thumb"
+  | "preview"
+  | "full_webp"
+  | "full_avif"
+  | "original"
+  | "video"
+  | "download"
+  | "motion";
+
 export type PublicTripSummary = {
   id: number;
   title: string;
@@ -265,12 +275,13 @@ export const api = {
       share_note?: string;
       assets: PublicAsset[];
     }>(`/public/trips/${tripID}`),
-  publicAssetURL: (
-    id: number,
-    variant: "thumb" | "preview" | "original" | "video" | "download" | "motion",
-  ) =>
+  publicAssetURL: (id: number, variant: AssetURLVariant) =>
     apiFetch<{ url: string; variant: string; hls_status?: string }>(
       `/public/assets/${id}/url?variant=${variant}`,
+    ),
+  adminAssetURL: (id: number, variant: AssetURLVariant) =>
+    apiFetch<{ url: string; variant: string; hls_status?: string }>(
+      `/assets/${id}/url?variant=${variant}`,
     ),
   publicForward: (body: { note?: string; disable_forward?: boolean }) =>
     apiFetch<{ code: string; password: string; url: string }>("/public/forward", {

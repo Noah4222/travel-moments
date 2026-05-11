@@ -8,7 +8,9 @@ import { Spinner } from "./Spinner";
 import { supportsAVIF } from "@/lib/imageFormat";
 import { cn } from "@/lib/cn";
 
-export type LightboxAsset = {
+export type PhotoQuality = "preview" | "full_webp" | "original";
+
+type LightboxAsset = {
   id: number;
   kind: "photo" | "video";
   hls_status?: string;
@@ -38,8 +40,15 @@ export function Lightbox({
 }: Props) {
   const [index, setIndex] = useState(initialIndex);
   const [autoPlay, setAutoPlay] = useState(false);
+  const [quality, setQuality] = useState<PhotoQuality>("preview");
   const touchRef = useRef<{ x: number; y: number; t: number } | null>(null);
   const asset = assets[index];
+
+  // Switching to a new asset resets to the lightest variant so we don't
+  // accidentally re-download an original-size file on every navigation.
+  useEffect(() => {
+    setQuality("preview");
+  }, [asset?.id]);
 
   const go = useCallback(
     (delta: number) => {
@@ -109,6 +118,9 @@ export function Lightbox({
       className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/95 p-3 sm:p-4"
     >
       <div className="absolute right-3 top-3 z-10 flex flex-wrap justify-end gap-2 sm:right-4 sm:top-4">
+        {asset.kind === "photo" && (
+          <QualitySwitch value={quality} onChange={setQuality} />
+        )}
         <DownloadButton asset={asset} mode={mode} />
         {!singleMode && assets.length > 1 && (
           <Button
@@ -140,7 +152,7 @@ export function Lightbox({
         </>
       )}
 
-      <Stage asset={asset} mode={mode} key={asset.id} />
+      <Stage asset={asset} mode={mode} quality={quality} key={asset.id} />
 
       <div onClick={(e) => e.stopPropagation()} className="mt-3 text-xs text-zinc-400">
         {!singleMode && (
@@ -151,6 +163,43 @@ export function Lightbox({
       </div>
 
       <ExifAndCommentsPanel asset={asset} mode={mode} />
+    </div>
+  );
+}
+
+function QualitySwitch({
+  value,
+  onChange,
+}: {
+  value: PhotoQuality;
+  onChange: (q: PhotoQuality) => void;
+}) {
+  const items: { v: PhotoQuality; label: string; title: string }[] = [
+    { v: "preview", label: "预览", title: "压缩后的 1600px 预览（默认）" },
+    { v: "full_webp", label: "原尺寸", title: "原图分辨率的 WebP 重编码" },
+    { v: "original", label: "原图", title: "未处理的源文件，最大画质 / 最大流量" },
+  ];
+  return (
+    <div className="flex overflow-hidden rounded-md border border-white/20 text-xs">
+      {items.map((it) => (
+        <button
+          key={it.v}
+          type="button"
+          title={it.title}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange(it.v);
+          }}
+          className={cn(
+            "px-2.5 py-1 transition",
+            value === it.v
+              ? "bg-white text-zinc-900"
+              : "bg-white/10 text-white hover:bg-white/20",
+          )}
+        >
+          {it.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -201,7 +250,15 @@ function NavArrow({ side, onClick }: { side: "left" | "right"; onClick: () => vo
   );
 }
 
-function Stage({ asset, mode }: { asset: LightboxAsset; mode: Mode }) {
+function Stage({
+  asset,
+  mode,
+  quality,
+}: {
+  asset: LightboxAsset;
+  mode: Mode;
+  quality: PhotoQuality;
+}) {
   const [src, setSrc] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -214,40 +271,58 @@ function Stage({ asset, mode }: { asset: LightboxAsset; mode: Mode }) {
     setErrored(false);
     setInfo(null);
     setSrc(null);
-    if (mode === "admin") {
-      // Use the URLs the listing already produced — no extra OSS sign call,
-      // no AssetView recorded (admin browse should not inflate stats).
-      (async () => {
-        if (asset.kind === "video") {
-          setSrc(asset.urls?.video ?? null);
-          if (asset.hls_status === "pending") setInfo("视频转码中，先看原画");
-        } else {
-          const avif = await supportsAVIF();
-          const url =
-            (avif && asset.urls?.preview?.avif) ||
-            asset.urls?.preview?.webp ||
-            asset.urls?.preview?.avif ||
-            null;
-          if (!cancelled) setSrc(url);
-        }
-      })();
+    // Videos ignore the quality switch entirely.
+    if (asset.kind === "video") {
+      if (mode === "admin") {
+        setSrc(asset.urls?.video ?? null);
+        if (asset.hls_status === "pending") setInfo("视频转码中，先看原画");
+      } else {
+        api
+          .publicAssetURL(asset.id, "video")
+          .then((r) => {
+            if (cancelled) return;
+            setSrc(r.url);
+            if (r.hls_status === "pending") setInfo("视频转码中，先看原画");
+          })
+          .catch(() => setLoading(false));
+      }
       return () => {
         cancelled = true;
       };
     }
-    const variant = asset.kind === "video" ? "video" : "preview";
-    api
-      .publicAssetURL(asset.id, variant)
-      .then((r) => {
-        if (cancelled) return;
-        setSrc(r.url);
-        if (r.hls_status === "pending") setInfo("视频转码中，先看原画");
-      })
-      .catch(() => setLoading(false));
+    // Photos: pick the variant matching the quality knob.
+    // - preview (default): pre-sized WebP / AVIF
+    // - full_webp: original pixels, WebP re-encode (smaller than original)
+    // - original: raw source bytes
+    (async () => {
+      let variant: "preview" | "full_webp" | "full_avif" | "original" = "preview";
+      if (quality === "full_webp") {
+        const avif = await supportsAVIF();
+        variant = avif ? "full_avif" : "full_webp";
+      } else if (quality === "original") {
+        variant = "original";
+      } else if (mode === "admin") {
+        // admin + preview can use the listing-shipped URLs and skip a roundtrip.
+        const avif = await supportsAVIF();
+        const url =
+          (avif && asset.urls?.preview?.avif) ||
+          asset.urls?.preview?.webp ||
+          asset.urls?.preview?.avif ||
+          null;
+        if (!cancelled) setSrc(url);
+        return;
+      }
+      const r =
+        mode === "admin"
+          ? await api.adminAssetURL(asset.id, variant)
+          : await api.publicAssetURL(asset.id, variant);
+      if (cancelled) return;
+      setSrc(r.url);
+    })().catch(() => setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [asset.id, asset.kind, asset.hls_status, asset.urls, mode]);
+  }, [asset.id, asset.kind, asset.hls_status, asset.urls, mode, quality]);
 
   return (
     <div

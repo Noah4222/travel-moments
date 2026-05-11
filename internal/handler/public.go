@@ -467,6 +467,10 @@ func (h *Handler) signPublicVariant(a *ent.Asset, variant string) (url string, k
 			return h.signCachedVariant(a.ID, a.OssKey, oss.VariantVideoCoverWebP, h.Settings.URLTTL()), "view", nil
 		}
 		return h.signCachedVariant(a.ID, a.OssKey, oss.VariantPreviewWebP, h.Settings.URLTTL()), "view", nil
+	case "full_webp":
+		return h.signCachedVariant(a.ID, a.OssKey, oss.VariantFullWebP, h.Settings.URLTTL()), "view", nil
+	case "full_avif":
+		return h.signCachedVariant(a.ID, a.OssKey, oss.VariantFullAVIF, h.Settings.URLTTL()), "view", nil
 	case "original":
 		return h.signCachedKey(a.ID, "orig", a.OssKey, "", h.Settings.URLTTL()), "view", nil
 	case "download":
