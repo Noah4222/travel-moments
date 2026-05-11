@@ -2,23 +2,82 @@ import { useRef, useState } from "react";
 import { api, type Asset } from "@/lib/api";
 import { Badge, Button, Card, Input } from "./ui";
 import { PicturePreview } from "./PicturePreview";
+import { cn } from "@/lib/cn";
 
 export function AssetGrid({
   assets,
   isAdmin,
   coverAssetID,
   onDelete,
+  onBulkDelete,
   onClick,
   onCoverChange,
 }: {
   assets: Asset[];
   isAdmin: boolean;
   coverAssetID?: number | null;
-  onDelete?: (a: Asset) => void;
+  onDelete?: (a: Asset) => void | Promise<void>;
+  /** Bulk-delete; defaults to calling onDelete sequentially. */
+  onBulkDelete?: (ids: number[]) => Promise<void>;
   onClick?: (a: Asset) => void;
   onCoverChange?: () => void | Promise<void>;
 }) {
   const [shareInfo, setShareInfo] = useState<{ url: string } | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<{ done: number; total: number } | null>(null);
+
+  function toggle(id: number) {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function exitSelect() {
+    setSelectMode(false);
+    setSelected(new Set());
+  }
+
+  async function runBulkDelete() {
+    if (selected.size === 0) return;
+    if (!window.confirm(`删除选中的 ${selected.size} 个资源？此操作不可撤销`)) return;
+    const ids = Array.from(selected);
+    setBulkBusy({ done: 0, total: ids.length });
+    try {
+      if (onBulkDelete) {
+        await onBulkDelete(ids);
+      } else if (onDelete) {
+        // Default: small concurrency pool over per-asset delete.
+        const limit = 4;
+        let next = 0;
+        let done = 0;
+        const workers = Array.from({ length: Math.min(limit, ids.length) }, async () => {
+          while (true) {
+            const i = next++;
+            if (i >= ids.length) return;
+            const id = ids[i];
+            const a = assets.find((x) => x.id === id);
+            if (a) {
+              try {
+                await onDelete(a);
+              } catch {
+                /* surface aggregate later if needed */
+              }
+            }
+            done++;
+            setBulkBusy({ done, total: ids.length });
+          }
+        });
+        await Promise.all(workers);
+      }
+    } finally {
+      setBulkBusy(null);
+      exitSelect();
+    }
+  }
 
   if (assets.length === 0) {
     return (
@@ -27,8 +86,56 @@ export function AssetGrid({
       </p>
     );
   }
+
   return (
     <>
+      {isAdmin && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          {!selectMode ? (
+            <>
+              <p className="text-xs text-zinc-500">{assets.length} 个资源</p>
+              <Button size="sm" variant="outline" onClick={() => setSelectMode(true)}>
+                批量选择
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm">
+                已选 <b>{selected.size}</b> / {assets.length}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    setSelected(
+                      selected.size === assets.length
+                        ? new Set()
+                        : new Set(assets.map((a) => a.id)),
+                    )
+                  }
+                >
+                  {selected.size === assets.length ? "全不选" : "全选"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={selected.size === 0 || !!bulkBusy}
+                  onClick={runBulkDelete}
+                >
+                  {bulkBusy
+                    ? `删除中 ${bulkBusy.done}/${bulkBusy.total}…`
+                    : `删除${selected.size > 0 ? ` (${selected.size})` : ""}`}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={exitSelect} disabled={!!bulkBusy}>
+                  退出
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {assets.map((a) => (
           <AssetTile
@@ -36,6 +143,9 @@ export function AssetGrid({
             asset={a}
             isAdmin={isAdmin}
             isCover={coverAssetID === a.id}
+            selectMode={selectMode}
+            selected={selected.has(a.id)}
+            onToggleSelect={() => toggle(a.id)}
             onClick={onClick}
             onDelete={onDelete}
             onShared={(url) => setShareInfo({ url })}
@@ -54,6 +164,9 @@ function AssetTile({
   asset,
   isAdmin,
   isCover,
+  selectMode,
+  selected,
+  onToggleSelect,
   onClick,
   onDelete,
   onShared,
@@ -62,8 +175,11 @@ function AssetTile({
   asset: Asset;
   isAdmin: boolean;
   isCover?: boolean;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
   onClick?: (a: Asset) => void;
-  onDelete?: (a: Asset) => void;
+  onDelete?: (a: Asset) => void | Promise<void>;
   onShared?: (url: string) => void;
   onCoverChange?: () => void | Promise<void>;
 }) {
@@ -74,7 +190,7 @@ function AssetTile({
   const [coverBusy, setCoverBusy] = useState(false);
 
   function play() {
-    if (!live) return;
+    if (!live || selectMode) return;
     const v = videoRef.current;
     if (v) {
       v.currentTime = 0;
@@ -91,7 +207,10 @@ function AssetTile({
 
   return (
     <li
-      className="group relative aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-900"
+      className={cn(
+        "group relative aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-900",
+        selectMode && selected && "ring-2 ring-emerald-500",
+      )}
       onMouseEnter={play}
       onMouseLeave={stop}
       onTouchStart={play}
@@ -99,7 +218,10 @@ function AssetTile({
     >
       <button
         type="button"
-        onClick={() => onClick?.(asset)}
+        onClick={() => {
+          if (selectMode) onToggleSelect?.();
+          else onClick?.(asset);
+        }}
         className="block h-full w-full"
       >
         <PicturePreview
@@ -117,6 +239,22 @@ function AssetTile({
           />
         )}
       </button>
+
+      {selectMode && (
+        <div className="pointer-events-none absolute inset-0 flex items-start justify-end p-2">
+          <span
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-full border-2 text-sm font-bold transition",
+              selected
+                ? "border-emerald-500 bg-emerald-500 text-white"
+                : "border-white/80 bg-black/30 text-transparent",
+            )}
+          >
+            ✓
+          </span>
+        </div>
+      )}
+
       <div className="pointer-events-none absolute left-2 top-2 flex gap-1">
         {asset.kind === "video" && (
           <Badge tone="warning">
@@ -126,7 +264,7 @@ function AssetTile({
         {live && <Badge tone="neutral">⚡ Live</Badge>}
         {isCover && <Badge tone="success">★ 封面</Badge>}
       </div>
-      {isAdmin && (
+      {isAdmin && !selectMode && (
         <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
           {asset.kind === "photo" && !isCover && (
             <button
