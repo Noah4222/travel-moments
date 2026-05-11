@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+html {
+  /* Prevent iOS double-tap zoom + disable pinch zoom. */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* iPhone notch / Android nav bar safe area is referenced via env() below. */
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  /* Prevent horizontal scroll on small screens when content slightly overflows. */
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  background: theme("colors.zinc.50");
+  color: theme("colors.zinc.900");
+  font-family: theme("fontFamily.sans");
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Respect iOS safe area on top/bottom (nav bar / home indicator). */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Inputs at <16px font-size cause iOS Safari to auto-zoom on focus —
+   force ≥16px on small viewports. */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: theme("colors.zinc.950");
+    color: theme("colors.zinc.100");
+  }
+}

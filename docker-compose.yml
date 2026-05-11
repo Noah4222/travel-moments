@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: travel-moments-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: travel_moments
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - travel-moments-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d travel_moments"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  travel-moments-pg-data:

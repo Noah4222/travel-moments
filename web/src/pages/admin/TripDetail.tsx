@@ -1,0 +1,224 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { api, type Asset, type Trip, type User } from "@/lib/api";
+import { Badge, Button, Card } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
+import { UploadDropzone } from "@/components/UploadDropzone";
+import { AssetGrid } from "@/components/AssetGrid";
+import { SharesPanel } from "@/components/SharesPanel";
+import { CollectionsPanel } from "@/components/CollectionsPanel";
+import { CommentsPanel } from "@/components/CommentsPanel";
+import { UploadGrantsPanel } from "@/components/UploadGrantsPanel";
+
+type NavigateFn = (to: string) => void;
+
+function AdminTripActions({
+  trip,
+  tripId,
+  onChanged,
+  navigate,
+}: {
+  trip: Trip;
+  tripId: number;
+  onChanged: () => void;
+  navigate: NavigateFn;
+}) {
+  const [toggling, setToggling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <label className="flex items-center gap-2 text-xs text-zinc-500">
+        <input
+          type="checkbox"
+          disabled={toggling}
+          checked={!!trip.show_view_counts}
+          onChange={async (e) => {
+            setToggling(true);
+            try {
+              await api.updateTrip(tripId, {
+                show_view_counts: e.target.checked,
+              } as Partial<Trip>);
+              await onChanged();
+            } finally {
+              setToggling(false);
+            }
+          }}
+        />
+        访客可见访问次数 {toggling && "…"}
+      </label>
+      <Button
+        variant="danger"
+        disabled={deleting}
+        onClick={async () => {
+          if (!window.confirm(`删除 ${trip.title}？此操作不可恢复`)) return;
+          setDeleting(true);
+          try {
+            await api.deleteTrip(tripId);
+            navigate("/admin");
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      >
+        {deleting ? "删除中…" : "删除旅程"}
+      </Button>
+    </div>
+  );
+}
+
+export function TripDetailPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const tripId = Number(id);
+  const [trip, setTrip] = useState<Trip | null>(null);
+  const [users, setUsers] = useState<User[] | null>(null);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  async function reload() {
+    try {
+      const [t, as] = await Promise.all([
+        api.getTrip(tripId),
+        api.listAssets(tripId),
+      ]);
+      setTrip(t);
+      setAssets(as);
+      if (user?.role === "admin") {
+        setUsers(await api.listUsers());
+      }
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function reloadAssets() {
+    try {
+      setAssets(await api.listAssets(tripId));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripId]);
+
+  if (error) return <p className="text-rose-600">{error}</p>;
+  if (!trip) return <p className="text-zinc-500">加载中…</p>;
+
+  const editorIds = new Set(trip.editor_user_ids ?? []);
+  const isAdmin = user?.role === "admin";
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <Badge>{trip.slug}</Badge>
+          <h1 className="mt-2 break-words text-2xl font-semibold sm:text-3xl">
+            {trip.title}
+          </h1>
+          {trip.location && (
+            <p className="mt-1 text-sm text-zinc-500">📍 {trip.location}</p>
+          )}
+          {trip.description && (
+            <p className="mt-3 max-w-2xl text-sm text-zinc-600 sm:text-base dark:text-zinc-400">
+              {trip.description}
+            </p>
+          )}
+        </div>
+        <div className="flex w-full flex-wrap items-start gap-2 sm:w-auto">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => navigate(`/admin/trips/${tripId}/preview`)}
+          >
+            浏览相册 →
+          </Button>
+          {isAdmin && (
+            <AdminTripActions
+              trip={trip}
+              tripId={tripId}
+              onChanged={reload}
+              navigate={navigate}
+            />
+          )}
+        </div>
+      </div>
+
+      <Card className="p-6">
+        <h2 className="mb-3 text-lg font-semibold">照片 / 视频</h2>
+        <div className="mb-6">
+          <UploadDropzone tripId={tripId} onUploaded={reloadAssets} />
+        </div>
+        <AssetGrid
+          assets={assets}
+          isAdmin={isAdmin}
+          coverAssetID={trip.cover_asset_id ?? undefined}
+          onClick={(a) => navigate(`/admin/trips/${tripId}/preview?asset=${a.id}`)}
+          onDelete={async (a) => {
+            await api.deleteAsset(a.id);
+            await reloadAssets();
+          }}
+          onCoverChange={reload}
+        />
+      </Card>
+
+      <Card className="p-6">
+        <CollectionsPanel tripId={tripId} assets={assets} />
+      </Card>
+
+      <Card className="p-6">
+        <SharesPanel tripId={tripId} />
+      </Card>
+
+      {isAdmin && (
+        <Card className="p-6">
+          <UploadGrantsPanel tripId={tripId} />
+        </Card>
+      )}
+
+      {isAdmin && (
+        <Card className="p-6">
+          <CommentsPanel tripId={tripId} />
+        </Card>
+      )}
+
+      {isAdmin && users && (
+        <Card className="p-6">
+          <h2 className="mb-3 text-lg font-semibold">Editor 授权</h2>
+          <p className="mb-4 text-sm text-zinc-500">
+            勾选可上传到本旅程的 editor。admin 默认拥有所有权限。
+          </p>
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-900">
+            {users
+              .filter((u) => u.role === "editor")
+              .map((u) => {
+                const has = editorIds.has(u.id);
+                return (
+                  <li key={u.id} className="flex items-center justify-between py-2">
+                    <span className="text-sm">{u.username}</span>
+                    <Button
+                      size="sm"
+                      variant={has ? "outline" : "primary"}
+                      onClick={async () => {
+                        if (has) await api.removeEditor(tripId, u.id);
+                        else await api.addEditor(tripId, u.id);
+                        reload();
+                      }}
+                    >
+                      {has ? "取消授权" : "授权"}
+                    </Button>
+                  </li>
+                );
+              })}
+            {users.filter((u) => u.role === "editor").length === 0 && (
+              <p className="text-sm text-zinc-500">没有 editor 账号，先到「用户」页面创建。</p>
+            )}
+          </ul>
+        </Card>
+      )}
+    </div>
+  );
+}

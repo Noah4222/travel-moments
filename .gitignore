@@ -1,0 +1,11 @@
+.env
+*.log
+/bin/
+/dist/
+/tmp/
+/data/
+node_modules/
+web/dist/
+web/node_modules/
+.DS_Store
+build-errors.log
