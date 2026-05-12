@@ -79,7 +79,13 @@ export function isPasskeySupported(): boolean {
 
 export async function registerPasskey(name?: string): Promise<void> {
   const opts = (await api.passkeyRegisterStart(name)) as any;
-  console.debug("[passkey] register/start ->", opts);
+  console.debug("[passkey] register/start ->", {
+    rpId: opts?.publicKey?.rp?.id ?? opts?.rp?.id,
+    rpName: opts?.publicKey?.rp?.name ?? opts?.rp?.name,
+    user: opts?.publicKey?.user?.name ?? opts?.user?.name,
+    excludeCount: (opts?.publicKey?.excludeCredentials ?? opts?.excludeCredentials ?? []).length,
+    locationHost: typeof window !== "undefined" ? window.location.host : "",
+  });
   const publicKey = preparePublicKey(opts.publicKey ?? opts);
   let cred: PublicKeyCredential | null;
   try {
@@ -88,7 +94,7 @@ export async function registerPasskey(name?: string): Promise<void> {
     })) as PublicKeyCredential | null;
   } catch (e) {
     console.error("[passkey] navigator.credentials.create rejected:", e);
-    throw e;
+    throw friendlyWebAuthnError(e, "register");
   }
   if (!cred) throw new Error("Passkey 注册被取消");
   console.debug("[passkey] got attestation, finishing");
@@ -100,7 +106,14 @@ export async function loginWithPasskey(username?: string): Promise<{
   user: { id: number; username: string; role: string };
 }> {
   const opts = (await api.passkeyLoginStart(username)) as any;
-  console.debug("[passkey] login/start ->", opts);
+  const allow = opts?.publicKey?.allowCredentials ?? opts?.allowCredentials ?? [];
+  console.debug("[passkey] login/start ->", {
+    rpId: opts?.publicKey?.rpId ?? opts?.rpId,
+    allowCount: allow.length,
+    discoverable: allow.length === 0,
+    userVerification: opts?.publicKey?.userVerification ?? opts?.userVerification,
+    locationHost: typeof window !== "undefined" ? window.location.host : "",
+  });
   const publicKey = preparePublicKey(opts.publicKey ?? opts);
   let cred: PublicKeyCredential | null;
   try {
@@ -109,9 +122,55 @@ export async function loginWithPasskey(username?: string): Promise<{
     })) as PublicKeyCredential | null;
   } catch (e) {
     console.error("[passkey] navigator.credentials.get rejected:", e);
-    throw e;
+    throw friendlyWebAuthnError(e, "login", { hadAllowList: allow.length > 0 });
   }
   if (!cred) throw new Error("Passkey 登录被取消");
   console.debug("[passkey] got assertion, finishing");
   return api.passkeyLoginFinish(credentialToJSON(cred));
+}
+
+function friendlyWebAuthnError(
+  e: unknown,
+  op: "login" | "register",
+  ctx: { hadAllowList?: boolean } = {},
+): Error {
+  if (!(e instanceof DOMException)) {
+    return e instanceof Error ? e : new Error(String(e));
+  }
+  const verb = op === "login" ? "登录" : "注册";
+  switch (e.name) {
+    case "NotAllowedError": {
+      // The umbrella WebAuthn error: cancel / timeout / no matching credential.
+      const tips: string[] = [];
+      if (op === "login") {
+        if (!ctx.hadAllowList) {
+          tips.push(
+            "如果你没填用户名：当前账号可能没有「resident key」类型的 Passkey，试试填用户名再点 Passkey 登录",
+          );
+        }
+        tips.push("检查是否在同一个域名/端口/协议下注册过 Passkey（IP 和域名互不相通）");
+        tips.push("Touch ID / Windows Hello 弹出后请在 60 秒内完成验证，且不要点取消");
+      } else {
+        tips.push("等待 Touch ID / Windows Hello / 安全密钥验证完成，不要点取消");
+        tips.push("如果同一个账号已经在该设备注册过 Passkey，浏览器可能拒绝重复注册");
+      }
+      return new Error(
+        `Passkey ${verb}失败：操作被取消、超时、或者本机找不到匹配的密钥。\n\n排查：\n· ${tips.join("\n· ")}`,
+      );
+    }
+    case "InvalidStateError":
+      return new Error(`Passkey ${verb}失败：该 Passkey 已被注册过 / 状态异常。`);
+    case "SecurityError":
+      return new Error(
+        `Passkey ${verb}失败：浏览器拒绝了 RP 配置（多半是 PUBLIC_BASE_URL 跟当前域名不匹配，或当前不是 HTTPS / localhost）。`,
+      );
+    case "AbortError":
+      return new Error(`Passkey ${verb}已取消。`);
+    case "ConstraintError":
+      return new Error(
+        `Passkey ${verb}失败：当前认证器不满足要求（例如不支持 resident key 或用户验证）。`,
+      );
+    default:
+      return new Error(`Passkey ${verb}失败（${e.name}）：${e.message}`);
+  }
 }
