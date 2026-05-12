@@ -87,6 +87,45 @@ export function Lightbox({
     if (index >= assets.length - 3) onLoadMore();
   }, [index, assets.length, hasMore, loadingMore, onLoadMore]);
 
+  // Image-level prefetch: warm the browser cache with the previous and next
+  // photo's preview URL so left/right navigation feels instant. Videos are
+  // skipped — touching their URL endpoint would lazily kick off transcoding
+  // for content the visitor may never actually open.
+  useEffect(() => {
+    if (assets.length < 2) return;
+    const neighbours = [assets[index - 1], assets[index + 1]].filter(
+      (a): a is LightboxAsset => !!a && a.kind === "photo",
+    );
+    let cancelled = false;
+    (async () => {
+      const avif = await supportsAVIF();
+      for (const a of neighbours) {
+        if (cancelled) return;
+        const useAvif = avif && canRenderAsAVIF(a);
+        let url: string | undefined;
+        if (mode === "admin") {
+          url =
+            (useAvif && a.urls?.preview?.avif) ||
+            a.urls?.preview?.webp ||
+            a.urls?.preview?.avif;
+        } else {
+          try {
+            url = (await api.publicAssetURL(a.id, "preview")).url;
+          } catch {
+            url = undefined;
+          }
+        }
+        if (cancelled || !url) continue;
+        const img = new Image();
+        img.decoding = "async";
+        img.src = url;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [index, assets, mode]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
