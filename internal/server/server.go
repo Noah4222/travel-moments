@@ -128,8 +128,8 @@ func New(cfg *config.Config, client *ent.Client, logger *slog.Logger) *echo.Echo
 	// Upload: any logged-in user with access to that trip
 	api.GET("/upload-limits", h.PublicUploadLimits)
 	api.GET("/assets/:id/url", h.AdminAssetURL, auth.RequireUser)
-	api.POST("/upload/policy", h.UploadPolicy, auth.RequireUploadOrUser)
-	api.POST("/upload/complete", h.UploadComplete, auth.RequireUploadOrUser)
+	api.POST("/upload/policy", h.UploadPolicy, h.RequireActiveUploadOrUser)
+	api.POST("/upload/complete", h.UploadComplete, h.RequireActiveUploadOrUser)
 
 	// Upload grants (one-shot upload links for non-account contributors)
 	trips.POST("/:id/upload-grants", h.CreateUploadGrant)

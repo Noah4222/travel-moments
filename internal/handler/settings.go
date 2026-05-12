@@ -69,8 +69,7 @@ func (h *Handler) AdminUpdateSetting(c echo.Context) error {
 	switch req.Key {
 	case settings.KeyURLTTL,
 		settings.KeyURLCacheTTL,
-		settings.KeyAssetShareTTL,
-		settings.KeyUploadTokenTTL:
+		settings.KeyAssetShareTTL:
 		if req.Value != "" {
 			if _, err := time.ParseDuration(req.Value); err != nil {
 				return echo.NewHTTPError(http.StatusBadRequest, "value must be a duration like 10m / 24h")

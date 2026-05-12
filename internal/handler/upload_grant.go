@@ -203,9 +203,11 @@ func (h *Handler) ConsumeUploadGrant(c echo.Context) error {
 		return err
 	}
 
-	ttl := h.Settings.UploadTokenTTL()
-	if ttl <= 0 {
-		ttl = time.Hour
+	// Upload session lives until the grant itself expires — admin sets the
+	// link TTL when generating it, no separate system-wide knob.
+	ttl := time.Until(g.ExpiresAt)
+	if ttl < time.Minute {
+		return echo.NewHTTPError(http.StatusGone, "link expires too soon")
 	}
 	tok, exp, err := h.UploadJWT.Issue(g.TripID, g.ID, ttl)
 	if err != nil {
@@ -221,6 +223,28 @@ func (h *Handler) ConsumeUploadGrant(c echo.Context) error {
 		ExpiresAt:   exp,
 		TripID:      g.TripID,
 		TripTitle:   title,
+	})
+}
+
+// RequireActiveUploadOrUser is a middleware that combines auth.RequireUploadOrUser
+// with a DB check: when the request carries an upload-grant JWT, verify the
+// underlying grant has not been revoked. This makes admin "立即失效" actually
+// kick in-flight upload sessions out, not just block future consumes.
+func (h *Handler) RequireActiveUploadOrUser(next echo.HandlerFunc) echo.HandlerFunc {
+	return auth.RequireUploadOrUser(func(c echo.Context) error {
+		if uc, ok := auth.UploadClaimsFrom(c); ok {
+			g, err := h.DB.UploadGrant.Get(c.Request().Context(), uc.GrantID)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "upload grant gone")
+			}
+			if g.RevokedAt != nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "upload link revoked")
+			}
+			if time.Now().After(g.ExpiresAt) {
+				return echo.NewHTTPError(http.StatusUnauthorized, "upload link expired")
+			}
+		}
+		return next(c)
 	})
 }
 

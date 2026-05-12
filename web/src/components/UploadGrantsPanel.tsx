@@ -110,13 +110,17 @@ export function UploadGrantsPanel({ tripId }: { tripId: number }) {
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   <Badge tone={statusTone(status)}>{statusLabel(status)}</Badge>
-                  {status === "ready" && (
+                  {(status === "ready" || status === "consumed") && (
                     <Button
                       size="sm"
                       variant="danger"
                       disabled={revoking === g.id}
                       onClick={async () => {
-                        if (!window.confirm("撤销该链接？")) return;
+                        const msg =
+                          status === "consumed"
+                            ? "立即让该链接的上传会话失效？正在上传的页面下次请求会被拒绝。"
+                            : "撤销该链接？";
+                        if (!window.confirm(msg)) return;
                         setRevoking(g.id);
                         try {
                           await api.revokeUploadGrant(g.id);
@@ -126,7 +130,11 @@ export function UploadGrantsPanel({ tripId }: { tripId: number }) {
                         }
                       }}
                     >
-                      {revoking === g.id ? "…" : "撤销"}
+                      {revoking === g.id
+                        ? "…"
+                        : status === "consumed"
+                          ? "立即失效"
+                          : "撤销"}
                     </Button>
                   )}
                 </div>

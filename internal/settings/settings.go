@@ -18,7 +18,6 @@ const (
 	KeyURLCacheTTL     = "signed_url_cache_ttl"     // duration string
 	KeyUploadCacheCtl  = "upload_cache_control"     // Cache-Control header to apply on upload
 	KeyAssetShareTTL   = "asset_share_default_ttl"  // single-asset share validity (e.g. "168h")
-	KeyUploadTokenTTL  = "upload_token_ttl"          // upload-grant session duration (e.g. "1h")
 	KeyUploadConcurrency = "upload_concurrency"     // max parallel uploads per browser; default 5
 
 	// OSS image-process strings (overrides). Empty → default from oss.ImageProcess.
@@ -102,7 +101,6 @@ func (s *Store) All() map[string]string {
 		KeyURLCacheTTL:    s.URLCacheTTL().String(),
 		KeyUploadCacheCtl: s.UploadCacheControl(),
 		KeyAssetShareTTL:  s.AssetShareTTL().String(),
-		KeyUploadTokenTTL:    s.UploadTokenTTL().String(),
 		KeyUploadConcurrency: strconv.Itoa(s.UploadConcurrency()),
 	}
 	for _, k := range ImageProcessKeys {
@@ -217,13 +215,6 @@ func (s *Store) UploadConcurrency() int {
 		return 32
 	}
 	return n
-}
-
-func (s *Store) UploadTokenTTL() time.Duration {
-	if d, ok := s.duration(KeyUploadTokenTTL); ok {
-		return d
-	}
-	return time.Hour
 }
 
 func (s *Store) AssetShareTTL() time.Duration {

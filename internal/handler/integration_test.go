@@ -130,8 +130,8 @@ func mountAPI(e *echo.Echo, jwt *auth.JWT, h *handler.Handler) {
 	tripsAdmin.POST("", h.CreateTrip)
 	tripsAdmin.POST("/:id/editors", h.AddEditor)
 
-	api.POST("/upload/policy", h.UploadPolicy, auth.RequireUploadOrUser)
-	api.POST("/upload/complete", h.UploadComplete, auth.RequireUploadOrUser)
+	api.POST("/upload/policy", h.UploadPolicy, h.RequireActiveUploadOrUser)
+	api.POST("/upload/complete", h.UploadComplete, h.RequireActiveUploadOrUser)
 	api.DELETE("/assets/:id", h.DeleteAsset, auth.RequireRole(auth.RoleAdmin))
 
 	// Upload grants
