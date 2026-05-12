@@ -76,12 +76,9 @@ export function PicturePreview({
   return (
     <div className={cn("relative overflow-hidden", className)}>
       {!loaded && !errored && (
-        <>
-          <div className="absolute inset-0 animate-pulse bg-zinc-200 dark:bg-zinc-800" />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Spinner className="h-6 w-6 text-zinc-400 dark:text-zinc-500" />
-          </div>
-        </>
+        <div className="absolute inset-0 flex items-center justify-center bg-zinc-200 dark:bg-zinc-800">
+          <Spinner className="h-6 w-6 text-zinc-400 dark:text-zinc-500" />
+        </div>
       )}
       {errored && (
         <div className="absolute inset-0 flex items-center justify-center text-xs text-zinc-400">
@@ -97,7 +94,7 @@ export function PicturePreview({
           onLoad={() => setLoaded(true)}
           onError={onError}
           className={cn(
-            "h-full w-full object-cover transition-opacity duration-200",
+            "h-full w-full object-cover",
             loaded ? "opacity-100" : "opacity-0",
           )}
         />

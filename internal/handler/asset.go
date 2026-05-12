@@ -244,7 +244,7 @@ func (h *Handler) ListAssets(c echo.Context) error {
 	}
 	assets, err := h.DB.Asset.Query().
 		Where(asset.TripIDEQ(id)).
-		Order(ent.Asc(asset.FieldSortOrder), ent.Asc(asset.FieldID)).
+		Order(ent.Desc(asset.FieldID)).
 		All(c.Request().Context())
 	if err != nil {
 		return err

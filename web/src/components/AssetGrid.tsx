@@ -210,12 +210,11 @@ function AssetTile({
     <li
       className={cn(
         "group relative aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-900",
+        "[content-visibility:auto] [contain-intrinsic-size:200px]",
         selectMode && selected && "ring-2 ring-emerald-500",
       )}
       onMouseEnter={play}
       onMouseLeave={stop}
-      onTouchStart={play}
-      onTouchEnd={stop}
     >
       <button
         type="button"
@@ -227,7 +226,7 @@ function AssetTile({
       >
         <PicturePreview
           urls={asset.kind === "video" ? asset.urls.video_cover : asset.urls.thumb}
-          className="h-full w-full object-cover transition group-hover:scale-105"
+          className="h-full w-full object-cover"
         />
         {live && (
           <video
@@ -236,7 +235,7 @@ function AssetTile({
             muted
             playsInline
             preload="none"
-            className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0 transition group-hover:opacity-100"
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0 group-hover:opacity-100"
           />
         )}
       </button>

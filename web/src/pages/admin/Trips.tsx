@@ -113,12 +113,11 @@ function TripsTimeline({ trips }: { trips: Trip[] }) {
                 to={`/admin/trips/${t.id}`}
                 className="block"
               >
-                <Card className="overflow-hidden transition hover:shadow-lg">
+                <Card className="overflow-hidden [content-visibility:auto] [contain-intrinsic-size:280px] hover:shadow-lg">
                   <div className="relative aspect-[16/9] bg-zinc-100 dark:bg-zinc-900">
                     <PicturePreview
                       urls={t.cover_url}
                       className="h-full w-full object-cover"
-                      loading="eager"
                     />
                     <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
                     <div className="absolute bottom-0 left-0 right-0 p-3 text-white sm:p-4">

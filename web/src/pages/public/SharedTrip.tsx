@@ -237,12 +237,11 @@ function TripListView({
                   onClick={() => onOpen(t.id)}
                   className="block w-full text-left"
                 >
-                  <Card className="overflow-hidden transition hover:shadow-lg">
+                  <Card className="overflow-hidden [content-visibility:auto] [contain-intrinsic-size:280px] hover:shadow-lg">
                     <div className="relative aspect-[16/9] bg-zinc-100 dark:bg-zinc-900">
                       <PicturePreview
                         urls={t.cover_url}
                         className="h-full w-full object-cover"
-                        loading="eager"
                       />
                       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
                       <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
@@ -297,7 +296,7 @@ function PublicTile({ asset, onClick }: { asset: PublicAsset; onClick: () => voi
 
   return (
     <li
-      className="group relative aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-900"
+      className="group relative aspect-square overflow-hidden rounded-lg bg-zinc-100 [content-visibility:auto] [contain-intrinsic-size:200px] dark:bg-zinc-900"
       onMouseEnter={() => {
         if (live && videoRef.current) {
           videoRef.current.currentTime = 0;
@@ -314,7 +313,7 @@ function PublicTile({ asset, onClick }: { asset: PublicAsset; onClick: () => voi
       <button type="button" onClick={onClick} className="block h-full w-full">
         <PicturePreview
           urls={asset.kind === "video" ? asset.urls.video_cover : asset.urls.thumb}
-          className="h-full w-full object-cover transition group-hover:scale-105"
+          className="h-full w-full object-cover"
         />
         {live && (
           <video
@@ -323,7 +322,7 @@ function PublicTile({ asset, onClick }: { asset: PublicAsset; onClick: () => voi
             muted
             playsInline
             preload="none"
-            className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0 transition group-hover:opacity-100"
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0 group-hover:opacity-100"
           />
         )}
       </button>

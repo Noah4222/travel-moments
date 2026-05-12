@@ -182,7 +182,7 @@ func (h *Handler) PublicTripScope(c echo.Context) error {
 	}
 	assets, err := h.DB.Asset.Query().
 		Where(asset.TripIDEQ(id)).
-		Order(ent.Asc(asset.FieldSortOrder), ent.Asc(asset.FieldID)).
+		Order(ent.Desc(asset.FieldID)).
 		All(ctx)
 	if err != nil {
 		return err
@@ -521,7 +521,7 @@ func (h *Handler) scopedAssets(c echo.Context, link *ent.ShareLink) ([]*ent.Asse
 	}
 	q := h.DB.Asset.Query().
 		Where(asset.TripIDEQ(link.TripID)).
-		Order(ent.Asc(asset.FieldSortOrder), ent.Asc(asset.FieldID))
+		Order(ent.Desc(asset.FieldID))
 	if link.Scope == sharelink.ScopeCollection && link.CollectionID != nil {
 		q = q.Where(asset.HasCollectionsWith(collection.IDEQ(*link.CollectionID)))
 	}
