@@ -234,6 +234,7 @@ export function TripDetailPage() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [users, setUsers] = useState<User[] | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [assetsOpen, setAssetsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function reload() {
@@ -363,21 +364,39 @@ export function TripDetailPage() {
       </div>
 
       <Card className="p-6">
-        <h2 className="mb-3 text-lg font-semibold">照片 / 视频</h2>
-        <div className="mb-6">
-          <UploadDropzone tripId={tripId} onUploaded={reloadAssets} />
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">
+            照片 / 视频
+            <span className="ml-2 text-sm font-normal text-zinc-500">
+              （{assets.length}）
+            </span>
+          </h2>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setAssetsOpen((v) => !v)}
+          >
+            {assetsOpen ? "折叠" : "展开"}
+          </Button>
         </div>
-        <AssetGrid
-          assets={assets}
-          isAdmin={isAdmin}
-          coverAssetID={trip.cover_asset_id ?? undefined}
-          onClick={(a) => navigate(`/admin/trips/${tripId}/preview?asset=${a.id}`)}
-          onDelete={async (a) => {
-            await api.deleteAsset(a.id);
-            await reloadAssets();
-          }}
-          onCoverChange={reload}
-        />
+        {assetsOpen && (
+          <>
+            <div className="mb-6">
+              <UploadDropzone tripId={tripId} onUploaded={reloadAssets} />
+            </div>
+            <AssetGrid
+              assets={assets}
+              isAdmin={isAdmin}
+              coverAssetID={trip.cover_asset_id ?? undefined}
+              onClick={(a) => navigate(`/admin/trips/${tripId}/preview?asset=${a.id}`)}
+              onDelete={async (a) => {
+                await api.deleteAsset(a.id);
+                await reloadAssets();
+              }}
+              onCoverChange={reload}
+            />
+          </>
+        )}
       </Card>
 
       <Card className="p-6">
