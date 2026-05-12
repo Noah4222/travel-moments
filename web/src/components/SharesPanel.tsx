@@ -2,8 +2,15 @@ import { useEffect, useState } from "react";
 import { api, type Share, type ShareCreated, type ShareStats, type ShareTreeNode } from "@/lib/api";
 import { Badge, Button, Card, Input, Label } from "./ui";
 import { useAuth } from "@/lib/auth";
+import { copyText, composeTripShareCopy } from "@/lib/clipboard";
 
-export function SharesPanel({ tripId }: { tripId: number }) {
+export function SharesPanel({
+  tripId,
+  tripTitle,
+}: {
+  tripId: number;
+  tripTitle?: string;
+}) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [shares, setShares] = useState<Share[] | null>(null);
@@ -47,7 +54,17 @@ export function SharesPanel({ tripId }: { tripId: number }) {
         />
       )}
 
-      {created && <CreatedShareCard created={created} onClose={() => setCreated(null)} />}
+      {created && (
+        <CreatedShareCard
+          created={created}
+          onClose={() => setCreated(null)}
+          composeMessage={
+            tripTitle
+              ? (link) => composeTripShareCopy(tripTitle, link)
+              : undefined
+          }
+        />
+      )}
 
       {shares.length === 0 ? (
         <Card className="p-6 text-center text-sm text-zinc-500">还没有分享</Card>
@@ -135,14 +152,18 @@ export function SharesPanel({ tripId }: { tripId: number }) {
 export function CreatedShareCard({
   created,
   onClose,
+  composeMessage,
 }: {
   created: ShareCreated;
   onClose?: () => void;
+  /** Build the actual clipboard payload from the full link. Default: link only. */
+  composeMessage?: (link: string) => string;
 }) {
   const url = `${window.location.origin}${created.url}`;
   const fullURL = created.password
     ? `${url}#${encodeURIComponent(created.password)}`
     : url;
+  const clipboard = composeMessage ? composeMessage(fullURL) : fullURL;
   return (
     <Card className="border border-emerald-300 bg-emerald-50 p-4 text-sm dark:border-emerald-800 dark:bg-emerald-950/30">
       <p className="mb-2 font-medium text-emerald-700 dark:text-emerald-300">
@@ -165,12 +186,8 @@ export function CreatedShareCard({
         )}
       </div>
       <div className="mt-3 flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => navigator.clipboard.writeText(fullURL)}
-        >
-          复制完整链接
+        <Button size="sm" variant="outline" onClick={() => copyText(clipboard)}>
+          复制{composeMessage ? "分享文案" : "完整链接"}
         </Button>
         {onClose && (
           <Button size="sm" variant="ghost" onClick={onClose}>

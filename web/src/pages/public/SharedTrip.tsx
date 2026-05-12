@@ -178,7 +178,12 @@ export function SharedTripPage() {
           onIndexChange={openAt}
         />
       )}
-      {forwardOpen && <ForwardDialog onClose={() => setForwardOpen(false)} />}
+      {forwardOpen && (
+        <ForwardDialog
+          tripTitle={viewing?.title}
+          onClose={() => setForwardOpen(false)}
+        />
+      )}
     </div>
   );
 }

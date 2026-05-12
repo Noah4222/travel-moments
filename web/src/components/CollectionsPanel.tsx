@@ -9,6 +9,7 @@ import { Badge, Button, Card, Input, Label } from "./ui";
 import { PicturePreview } from "./PicturePreview";
 import { CreatedShareCard } from "./SharesPanel";
 import { cn } from "@/lib/cn";
+import { composeCollectionShareCopy } from "@/lib/clipboard";
 
 export function CollectionsPanel({
   tripId,
@@ -21,7 +22,7 @@ export function CollectionsPanel({
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Collection | null>(null);
   const [editLoading, setEditLoading] = useState(false);
-  const [shareInfo, setShareInfo] = useState<ShareCreated | null>(null);
+  const [shareInfo, setShareInfo] = useState<{ created: ShareCreated; title: string } | null>(null);
   const [sharingID, setSharingID] = useState<number | null>(null);
   const [deletingID, setDeletingID] = useState<number | null>(null);
 
@@ -91,7 +92,13 @@ export function CollectionsPanel({
         />
       )}
 
-      {shareInfo && <CreatedShareCard created={shareInfo} onClose={() => setShareInfo(null)} />}
+      {shareInfo && (
+        <CreatedShareCard
+          created={shareInfo.created}
+          composeMessage={(link) => composeCollectionShareCopy(shareInfo.title, link)}
+          onClose={() => setShareInfo(null)}
+        />
+      )}
 
       {list.length === 0 ? (
         <p className="text-sm text-zinc-500">还没有圈选</p>
@@ -125,7 +132,7 @@ export function CollectionsPanel({
                     setSharingID(c.id);
                     try {
                       const info = await api.createCollectionShare(c.id, {});
-                      setShareInfo(info);
+                      setShareInfo({ created: info, title: c.title });
                     } finally {
                       setSharingID(null);
                     }

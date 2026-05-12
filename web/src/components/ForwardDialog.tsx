@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { Button, Card, Input, Label, Textarea } from "./ui";
+import { copyText, composeForwardCopy } from "@/lib/clipboard";
 
-export function ForwardDialog({ onClose }: { onClose: () => void }) {
+export function ForwardDialog({
+  onClose,
+  tripTitle,
+}: {
+  onClose: () => void;
+  tripTitle?: string;
+}) {
   const [note, setNote] = useState("");
   const [disableForward, setDisableForward] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -27,6 +34,7 @@ export function ForwardDialog({ onClose }: { onClose: () => void }) {
   const shareURL = result
     ? `${window.location.origin}${result.url}#${encodeURIComponent(result.password)}`
     : "";
+  const clipboard = shareURL ? composeForwardCopy(tripTitle, shareURL) : "";
 
   return (
     <div
@@ -52,9 +60,9 @@ export function ForwardDialog({ onClose }: { onClose: () => void }) {
               <Button
                 variant="outline"
                 className="flex-1"
-                onClick={() => navigator.clipboard.writeText(shareURL)}
+                onClick={() => copyText(clipboard)}
               >
-                复制链接
+                复制分享文案
               </Button>
               <Button className="flex-1" onClick={onClose}>
                 完成

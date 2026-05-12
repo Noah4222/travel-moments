@@ -3,6 +3,7 @@ import { api, type Asset } from "@/lib/api";
 import { Badge, Button, Card, Input } from "./ui";
 import { PicturePreview } from "./PicturePreview";
 import { cn } from "@/lib/cn";
+import { copyText, composeAssetShareCopy } from "@/lib/clipboard";
 
 export function AssetGrid({
   assets,
@@ -296,7 +297,7 @@ function AssetTile({
               try {
                 const r = await api.createAssetShare(asset.id, {});
                 const absURL = `${window.location.origin}${r.url}`;
-                await navigator.clipboard.writeText(absURL).catch(() => {});
+                await copyText(composeAssetShareCopy(absURL));
                 onShared?.(absURL);
               } catch (err) {
                 alert("生成单图分享失败：" + (err as Error).message);
@@ -349,7 +350,7 @@ function SingleShareDialog({ url, onClose }: { url: string; onClose: () => void 
           <Button
             size="sm"
             variant="outline"
-            onClick={() => navigator.clipboard.writeText(url)}
+            onClick={() => copyText(composeAssetShareCopy(url))}
           >
             复制
           </Button>

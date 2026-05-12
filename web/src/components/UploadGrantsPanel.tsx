@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type UploadGrant, type UploadGrantCreated } from "@/lib/api";
 import { Badge, Button, Card, Input, Label } from "./ui";
+import { copyText, composeUploadCopy } from "@/lib/clipboard";
 
 const TTL_OPTIONS = [
   { label: "24 小时", hours: 24 },
@@ -9,7 +10,13 @@ const TTL_OPTIONS = [
   { label: "30 天", hours: 24 * 30 },
 ];
 
-export function UploadGrantsPanel({ tripId }: { tripId: number }) {
+export function UploadGrantsPanel({
+  tripId,
+  tripTitle,
+}: {
+  tripId: number;
+  tripTitle?: string;
+}) {
   const [list, setList] = useState<UploadGrant[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<UploadGrantCreated | null>(null);
@@ -86,7 +93,13 @@ export function UploadGrantsPanel({ tripId }: { tripId: number }) {
         </Card>
       )}
 
-      {created && <CreatedGrantCard created={created} onClose={() => setCreated(null)} />}
+      {created && (
+        <CreatedGrantCard
+          created={created}
+          tripTitle={tripTitle}
+          onClose={() => setCreated(null)}
+        />
+      )}
 
       {!list ? (
         <p className="text-sm text-zinc-500">加载链接…</p>
@@ -149,28 +162,37 @@ export function UploadGrantsPanel({ tripId }: { tripId: number }) {
 
 function CreatedGrantCard({
   created,
+  tripTitle,
   onClose,
 }: {
   created: UploadGrantCreated;
+  tripTitle?: string;
   onClose: () => void;
 }) {
   const url = `${window.location.origin}${created.url}#${encodeURIComponent(created.token)}`;
+  const clipboard = tripTitle ? composeUploadCopy(tripTitle, url) : url;
   return (
     <Card className="space-y-2 border-emerald-200 bg-emerald-50 p-4 text-sm dark:border-emerald-900 dark:bg-emerald-950/30">
       <p className="font-medium text-emerald-700 dark:text-emerald-300">
         ✓ 链接已生成（密钥在 # 后，只能用一次）
       </p>
       <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} />
+      {tripTitle && (
+        <details className="text-xs text-zinc-500">
+          <summary className="cursor-pointer select-none">
+            预览要复制的文案
+          </summary>
+          <pre className="mt-1 whitespace-pre-wrap rounded bg-white/60 p-2 dark:bg-zinc-900/60">
+            {clipboard}
+          </pre>
+        </details>
+      )}
       <p className="text-xs text-zinc-500">
         到期：{new Date(created.expires_at).toLocaleString()}
       </p>
       <div className="flex gap-2 pt-1">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => navigator.clipboard.writeText(url)}
-        >
-          复制链接
+        <Button size="sm" variant="outline" onClick={() => copyText(clipboard)}>
+          复制{tripTitle ? "邀请文案" : "链接"}
         </Button>
         <Button size="sm" variant="ghost" onClick={onClose}>关闭</Button>
       </div>

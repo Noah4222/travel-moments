@@ -4,6 +4,7 @@ import { Button, Card, Input, Label } from "./ui";
 import { PicturePreview } from "./PicturePreview";
 import { CreatedShareCard } from "./SharesPanel";
 import { cn } from "@/lib/cn";
+import { composeMultiShareCopy } from "@/lib/clipboard";
 
 const EXPIRY_OPTIONS = [
   { label: "永不过期", hours: 0 },
@@ -81,7 +82,11 @@ export function MultiShareDialog({
         </div>
 
         {created ? (
-          <CreatedShareCard created={created} onClose={onClose} />
+          <CreatedShareCard
+            created={created}
+            composeMessage={composeMultiShareCopy}
+            onClose={onClose}
+          />
         ) : (
           <>
             <div>

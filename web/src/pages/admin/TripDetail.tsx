@@ -404,12 +404,12 @@ export function TripDetailPage() {
       </Card>
 
       <Card className="p-6">
-        <SharesPanel tripId={tripId} />
+        <SharesPanel tripId={tripId} tripTitle={trip.title} />
       </Card>
 
       {isAdmin && (
         <Card className="p-6">
-          <UploadGrantsPanel tripId={tripId} />
+          <UploadGrantsPanel tripId={tripId} tripTitle={trip.title} />
         </Card>
       )}
 
