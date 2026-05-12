@@ -298,12 +298,16 @@ func TestUploadFlowAndPermissions(t *testing.T) {
 
 	// List assets returns 1 with thumb URL.
 	r := te.do("GET", fmt.Sprintf("/api/trips/%d/assets", tripA), adminTok, nil, "")
-	var assets []map[string]any
-	mustDecode(t, r, &assets)
-	if len(assets) != 1 {
-		t.Fatalf("expected 1 asset; got %d", len(assets))
+	var page struct {
+		Assets     []map[string]any `json:"assets"`
+		NextCursor *int             `json:"next_cursor"`
+		Total      *int             `json:"total"`
 	}
-	urls := assets[0]["urls"].(map[string]any)
+	mustDecode(t, r, &page)
+	if len(page.Assets) != 1 {
+		t.Fatalf("expected 1 asset; got %d", len(page.Assets))
+	}
+	urls := page.Assets[0]["urls"].(map[string]any)
 	thumbObj, _ := urls["thumb"].(map[string]any)
 	thumb, _ := thumbObj["webp"].(string)
 	if thumb == "" {
@@ -528,21 +532,23 @@ func fetchAssetURLs(t *testing.T, te *testEnv, tok string, tripID int) map[strin
 	t.Helper()
 	r := te.do("GET", fmt.Sprintf("/api/trips/%d/assets", tripID), tok, nil, "")
 	defer r.Body.Close()
-	var assets []struct {
-		URLs struct {
-			Thumb    map[string]string `json:"thumb"`
-			Preview  map[string]string `json:"preview"`
-			Download string            `json:"download"`
-		} `json:"urls"`
+	var page struct {
+		Assets []struct {
+			URLs struct {
+				Thumb    map[string]string `json:"thumb"`
+				Preview  map[string]string `json:"preview"`
+				Download string            `json:"download"`
+			} `json:"urls"`
+		} `json:"assets"`
 	}
-	mustDecode(t, r, &assets)
-	if len(assets) == 0 {
+	mustDecode(t, r, &page)
+	if len(page.Assets) == 0 {
 		t.Fatal("no assets")
 	}
 	return map[string]string{
-		"thumb":    assets[0].URLs.Thumb["webp"],
-		"preview":  assets[0].URLs.Preview["webp"],
-		"download": assets[0].URLs.Download,
+		"thumb":    page.Assets[0].URLs.Thumb["webp"],
+		"preview":  page.Assets[0].URLs.Preview["webp"],
+		"download": page.Assets[0].URLs.Download,
 	}
 }
 

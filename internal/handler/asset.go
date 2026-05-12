@@ -234,6 +234,41 @@ func (h *Handler) fetchImageInfo(key string) (map[string]any, error) {
 
 // ---- List assets in a trip ----
 
+// assetPage is the cursor-paginated response envelope. cursor = the id of the
+// last item from the previous page; the next query takes id < cursor. total
+// is the count for the whole trip and is only populated on the first page
+// (cursor == 0) so the frontend can render "N 张".
+type assetPage struct {
+	Assets     []assetDTO `json:"assets"`
+	NextCursor *int       `json:"next_cursor"`
+	Total      *int       `json:"total,omitempty"`
+}
+
+const (
+	defaultAssetPageSize = 100
+	maxAssetPageSize     = 200
+)
+
+func parseAssetPagination(c echo.Context) (cursor, limit int) {
+	limit = defaultAssetPageSize
+	if v := c.QueryParam("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			if n < 1 {
+				n = 1
+			} else if n > maxAssetPageSize {
+				n = maxAssetPageSize
+			}
+			limit = n
+		}
+	}
+	if v := c.QueryParam("cursor"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cursor = n
+		}
+	}
+	return
+}
+
 func (h *Handler) ListAssets(c echo.Context) error {
 	id, err := tripID(c)
 	if err != nil {
@@ -242,18 +277,63 @@ func (h *Handler) ListAssets(c echo.Context) error {
 	if err := h.ensureTripAccess(c, id); err != nil {
 		return err
 	}
-	assets, err := h.DB.Asset.Query().
-		Where(asset.TripIDEQ(id)).
-		Order(ent.Desc(asset.FieldID)).
-		All(c.Request().Context())
+	cursor, limit := parseAssetPagination(c)
+	page, err := h.pagedTripAssets(c.Request().Context(), id, cursor, limit)
 	if err != nil {
 		return err
 	}
-	out := make([]assetDTO, len(assets))
-	for i, a := range assets {
+	return c.JSON(http.StatusOK, page)
+}
+
+// ListAssetIDs returns every asset id in a trip (no signing, no pagination).
+// Used by the admin "全选" action so selection can span uploaded-but-not-yet-
+// rendered pages without forcing the full DTO build.
+func (h *Handler) ListAssetIDs(c echo.Context) error {
+	id, err := tripID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.ensureTripAccess(c, id); err != nil {
+		return err
+	}
+	ids, err := h.DB.Asset.Query().
+		Where(asset.TripIDEQ(id)).
+		Order(ent.Desc(asset.FieldID)).
+		IDs(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, ids)
+}
+
+// pagedTripAssets builds an assetPage for a trip, descending by id. cursor=0
+// means first page (the total is computed in that case).
+func (h *Handler) pagedTripAssets(ctx context.Context, tripID, cursor, limit int) (assetPage, error) {
+	q := h.DB.Asset.Query().Where(asset.TripIDEQ(tripID))
+	if cursor > 0 {
+		q = q.Where(asset.IDLT(cursor))
+	}
+	rows, err := q.Order(ent.Desc(asset.FieldID)).Limit(limit).All(ctx)
+	if err != nil {
+		return assetPage{}, err
+	}
+	out := make([]assetDTO, len(rows))
+	for i, a := range rows {
 		out[i] = h.toAssetDTO(a)
 	}
-	return c.JSON(http.StatusOK, out)
+	page := assetPage{Assets: out}
+	if len(rows) == limit {
+		next := rows[len(rows)-1].ID
+		page.NextCursor = &next
+	}
+	if cursor == 0 {
+		total, err := h.DB.Asset.Query().Where(asset.TripIDEQ(tripID)).Count(ctx)
+		if err != nil {
+			return assetPage{}, err
+		}
+		page.Total = &total
+	}
+	return page, nil
 }
 
 // resolveUploaderID picks the user_id to attribute new assets to: the logged-in

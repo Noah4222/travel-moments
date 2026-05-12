@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, type Asset, type Trip, type User } from "@/lib/api";
+import { api, type Trip, type User } from "@/lib/api";
 import { Badge, Button, Card, Input, Textarea } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth";
@@ -10,6 +10,7 @@ import { SharesPanel } from "@/components/SharesPanel";
 import { CollectionsPanel } from "@/components/CollectionsPanel";
 import { CommentsPanel } from "@/components/CommentsPanel";
 import { UploadGrantsPanel } from "@/components/UploadGrantsPanel";
+import { useInfiniteAssets } from "@/lib/useInfiniteAssets";
 
 type NavigateFn = (to: string) => void;
 
@@ -233,31 +234,28 @@ export function TripDetailPage() {
   const tripId = Number(id);
   const [trip, setTrip] = useState<Trip | null>(null);
   const [users, setUsers] = useState<User[] | null>(null);
-  const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const {
+    assets,
+    total,
+    hasMore,
+    loadingMore,
+    loadMore,
+    reload: reloadAssets,
+    setAssets,
+  } = useInfiniteAssets(tripId);
 
   async function reload() {
     try {
-      const [t, as] = await Promise.all([
-        api.getTrip(tripId),
-        api.listAssets(tripId),
-      ]);
+      const t = await api.getTrip(tripId);
       setTrip(t);
-      setAssets(as);
+      await reloadAssets();
       if (user?.role === "admin") {
         setUsers(await api.listUsers());
       }
     } catch (err) {
       setError(String(err));
-    }
-  }
-
-  async function reloadAssets() {
-    try {
-      setAssets(await api.listAssets(tripId));
-    } catch {
-      /* ignore */
     }
   }
 
@@ -388,9 +386,34 @@ export function TripDetailPage() {
               assets={assets}
               isAdmin={isAdmin}
               coverAssetID={trip.cover_asset_id ?? undefined}
+              total={total}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+              onLoadMore={loadMore}
+              fetchAllIDs={() => api.listAssetIDs(tripId)}
               onClick={(a) => navigate(`/admin/trips/${tripId}/preview?asset=${a.id}`)}
               onDelete={async (a) => {
                 await api.deleteAsset(a.id);
+                setAssets((cur) => cur.filter((x) => x.id !== a.id));
+              }}
+              onBulkDelete={async (ids) => {
+                const limit = 4;
+                let next = 0;
+                const workers = Array.from(
+                  { length: Math.min(limit, ids.length) },
+                  async () => {
+                    while (true) {
+                      const i = next++;
+                      if (i >= ids.length) return;
+                      try {
+                        await api.deleteAsset(ids[i]);
+                      } catch {
+                        /* aggregate ignored */
+                      }
+                    }
+                  },
+                );
+                await Promise.all(workers);
                 await reloadAssets();
               }}
               onCoverChange={reload}
@@ -400,7 +423,7 @@ export function TripDetailPage() {
       </Card>
 
       <Card className="p-6">
-        <CollectionsPanel tripId={tripId} assets={assets} />
+        <CollectionsPanel tripId={tripId} />
       </Card>
 
       <Card className="p-6">

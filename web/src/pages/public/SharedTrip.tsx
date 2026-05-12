@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, type PublicAsset, type PublicTripSummary } from "@/lib/api";
 import { Badge, Button, Card } from "@/components/ui";
@@ -15,6 +15,8 @@ type Scope = {
   subtitle?: string;
   share_note?: string;
   assets?: PublicAsset[];
+  next_cursor?: number | null;
+  total?: number;
   trips?: PublicTripSummary[];
 };
 
@@ -27,6 +29,8 @@ export function SharedTripPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [forwardOpen, setForwardOpen] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     api
@@ -62,6 +66,51 @@ export function SharedTripPage() {
   }, [scope, search]);
 
   const activeScope = scope?.scope === "multi" ? tripScope : scope;
+
+  // Pagination: load the next page of assets for the active view (trip share
+  // or one-trip-from-multi). Appends to whichever scope object is currently
+  // displayed.
+  const loadMore = useCallback(async () => {
+    if (!activeScope || loadingMore) return;
+    const cursor = activeScope.next_cursor;
+    if (cursor == null) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.publicNextAssets({
+        cursor,
+        limit: 100,
+        tripID: scope?.scope === "multi" ? activeScope.trip_id : undefined,
+      });
+      const append = (s: Scope | null): Scope | null => {
+        if (!s) return s;
+        const seen = new Set((s.assets ?? []).map((a) => a.id));
+        const merged = [
+          ...(s.assets ?? []),
+          ...page.assets.filter((a) => !seen.has(a.id)),
+        ];
+        return { ...s, assets: merged, next_cursor: page.next_cursor };
+      };
+      if (scope?.scope === "multi") setTripScope(append);
+      else setScope(append);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [activeScope, loadingMore, scope?.scope]);
+
+  // Bottom sentinel triggers loadMore when in view.
+  useEffect(() => {
+    if (!activeScope || activeScope.next_cursor == null) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMore();
+      },
+      { rootMargin: "400px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [activeScope, loadMore]);
   useEffect(() => {
     if (!activeScope?.assets) return;
     const raw = search.get("asset");
@@ -71,8 +120,9 @@ export function SharedTripPage() {
     }
     const aid = Number(raw);
     const i = activeScope.assets.findIndex((a) => a.id === aid);
-    setActiveIndex(i >= 0 ? i : null);
-  }, [activeScope, search]);
+    if (i >= 0) setActiveIndex(i);
+    else if (activeScope.next_cursor != null && !loadingMore) loadMore();
+  }, [activeScope, search, loadingMore, loadMore]);
 
   function openAt(i: number) {
     const aid = activeScope?.assets?.[i]?.id;
@@ -156,11 +206,34 @@ export function SharedTripPage() {
             <Spinner /> 加载中…
           </div>
         ) : viewing?.assets && viewing.assets.length > 0 ? (
-          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-            {viewing.assets.map((a, i) => (
-              <PublicTile key={a.id} asset={a} onClick={() => openAt(i)} />
-            ))}
-          </ul>
+          <>
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+              {viewing.assets.map((a, i) => (
+                <PublicTile key={a.id} asset={a} onClick={() => openAt(i)} />
+              ))}
+            </ul>
+            {viewing.next_cursor != null && (
+              <div
+                ref={sentinelRef}
+                className="flex items-center justify-center gap-2 py-6 text-sm text-zinc-500"
+              >
+                {loadingMore ? (
+                  <>
+                    <Spinner className="h-4 w-4" /> 加载更多…
+                  </>
+                ) : (
+                  <span>下滑加载更多</span>
+                )}
+              </div>
+            )}
+            {viewing.next_cursor == null &&
+              viewing.total != null &&
+              viewing.total > 0 && (
+                <p className="py-6 text-center text-xs text-zinc-400">
+                  — 共 {viewing.total} 张，到底啦 —
+                </p>
+              )}
+          </>
         ) : (
           <Card className="p-8 text-center text-sm text-zinc-500">还没有内容</Card>
         )}
@@ -174,6 +247,9 @@ export function SharedTripPage() {
         <Lightbox
           assets={viewing.assets}
           index={activeIndex}
+          hasMore={viewing.next_cursor != null}
+          loadingMore={loadingMore}
+          onLoadMore={loadMore}
           onClose={closeLightbox}
           onIndexChange={openAt}
         />

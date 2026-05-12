@@ -4,6 +4,8 @@ import { api, type Asset, type Trip } from "@/lib/api";
 import { Badge, Button, Card } from "@/components/ui";
 import { PicturePreview } from "@/components/PicturePreview";
 import { Lightbox } from "@/components/Lightbox";
+import { useInfiniteAssets } from "@/lib/useInfiniteAssets";
+import { Spinner } from "@/components/Spinner";
 
 /**
  * Admin / editor preview of an album — same browsing experience as a share
@@ -16,31 +18,47 @@ export function TripPreviewPage() {
   const [search, setSearch] = useSearchParams();
   const tripId = Number(id);
   const [trip, setTrip] = useState<Trip | null>(null);
-  const [assets, setAssets] = useState<Asset[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const {
+    assets,
+    total,
+    loading,
+    loadingMore,
+    hasMore,
+    loadMore,
+  } = useInfiniteAssets(tripId);
 
   useEffect(() => {
-    Promise.all([api.getTrip(tripId), api.listAssets(tripId)])
-      .then(([t, as]) => {
-        setTrip(t);
-        setAssets(as);
-      })
-      .catch((err) => setError(String(err)));
+    api.getTrip(tripId).then(setTrip).catch((err) => setError(String(err)));
   }, [tripId]);
 
-  // Sync ?asset=ID → activeIdx on load.
+  // Sync ?asset=ID → activeIdx whenever the loaded slice changes (so an id
+  // that lives on a later page becomes activatable once it's paged in).
   useEffect(() => {
-    if (!assets) return;
     const aidRaw = search.get("asset");
     if (!aidRaw) return;
     const aid = Number(aidRaw);
     const i = assets.findIndex((a) => a.id === aid);
     if (i >= 0) setActiveIdx(i);
-  }, [assets, search]);
+    else if (hasMore && !loadingMore) loadMore();
+  }, [assets, search, hasMore, loadingMore, loadMore]);
+
+  useEffect(() => {
+    if (!hasMore || !sentinelRef.current) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMore();
+      },
+      { rootMargin: "400px 0px" },
+    );
+    io.observe(sentinelRef.current);
+    return () => io.disconnect();
+  }, [hasMore, loadingMore, loadMore]);
 
   if (error) return <p className="text-rose-600">{error}</p>;
-  if (!trip || !assets) {
+  if (!trip || loading) {
     return <p className="text-zinc-500">加载中…</p>;
   }
 
@@ -78,11 +96,34 @@ export function TripPreviewPage() {
         </ul>
       )}
 
+      {(hasMore || loadingMore) && (
+        <div
+          ref={sentinelRef}
+          className="flex items-center justify-center gap-2 py-6 text-sm text-zinc-500"
+        >
+          {loadingMore ? (
+            <>
+              <Spinner className="h-4 w-4" /> 加载更多…
+            </>
+          ) : (
+            <span>下滑加载更多</span>
+          )}
+        </div>
+      )}
+      {!hasMore && total != null && total > 0 && (
+        <p className="py-6 text-center text-xs text-zinc-400">
+          — 共 {total} 个资源 —
+        </p>
+      )}
+
       {activeIdx !== null && (
         <Lightbox
           mode="admin"
           assets={assets}
           index={activeIdx}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onLoadMore={loadMore}
           onClose={() => {
             setActiveIdx(null);
             setSearch({});

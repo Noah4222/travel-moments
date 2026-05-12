@@ -147,6 +147,18 @@ export type Asset = {
   urls: AssetURLs;
 };
 
+export type AssetPage = {
+  assets: Asset[];
+  next_cursor: number | null;
+  total?: number;
+};
+
+export type PublicAssetPage = {
+  assets: PublicAsset[];
+  next_cursor: number | null;
+  total?: number;
+};
+
 export type UploadPolicy = {
   host: string;
   access_key_id: string;
@@ -193,7 +205,18 @@ export const api = {
   removeEditor: (tripId: number, userId: number) =>
     apiFetch<void>(`/trips/${tripId}/editors/${userId}`, { method: "DELETE" }),
 
-  listAssets: (tripId: number) => apiFetch<Asset[]>(`/trips/${tripId}/assets`),
+  listAssets: (
+    tripId: number,
+    opts: { cursor?: number; limit?: number } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (opts.cursor) qs.set("cursor", String(opts.cursor));
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    const tail = qs.toString() ? `?${qs}` : "";
+    return apiFetch<AssetPage>(`/trips/${tripId}/assets${tail}`);
+  },
+  listAssetIDs: (tripId: number) =>
+    apiFetch<number[]>(`/trips/${tripId}/asset-ids`),
   uploadPolicy: (
     body: { trip_id: number; filename: string; mime: string; kind: string },
     bearer?: string,
@@ -264,6 +287,8 @@ export const api = {
       subtitle?: string;
       share_note?: string;
       assets?: PublicAsset[];
+      next_cursor?: number | null;
+      total?: number;
       trips?: PublicTripSummary[];
     }>("/public/scope"),
   publicTripScope: (tripID: number) =>
@@ -274,7 +299,20 @@ export const api = {
       subtitle?: string;
       share_note?: string;
       assets: PublicAsset[];
+      next_cursor?: number | null;
+      total?: number;
     }>(`/public/trips/${tripID}`),
+  publicNextAssets: (opts: {
+    cursor: number;
+    limit?: number;
+    tripID?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set("cursor", String(opts.cursor));
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    if (opts.tripID) qs.set("trip_id", String(opts.tripID));
+    return apiFetch<PublicAssetPage>(`/public/assets?${qs}`);
+  },
   publicAssetURL: (id: number, variant: AssetURLVariant) =>
     apiFetch<{ url: string; variant: string; hls_status?: string }>(
       `/public/assets/${id}/url?variant=${variant}`,

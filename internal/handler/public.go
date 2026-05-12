@@ -25,15 +25,23 @@ import (
 // ---- DTOs ----
 
 type publicScopeResp struct {
-	Scope     string         `json:"scope"`
-	TripID    int            `json:"trip_id,omitempty"`
-	Title     string         `json:"title,omitempty"`
-	Cover     *string        `json:"cover_url,omitempty"`
-	Subtitle  string         `json:"subtitle,omitempty"`
-	Assets    []publicAsset  `json:"assets,omitempty"`
-	Trips     []publicTrip   `json:"trips,omitempty"`
-	ShareNote string         `json:"share_note,omitempty"`
-	From      *forwarderInfo `json:"forwarded_from,omitempty"`
+	Scope      string         `json:"scope"`
+	TripID     int            `json:"trip_id,omitempty"`
+	Title      string         `json:"title,omitempty"`
+	Cover      *string        `json:"cover_url,omitempty"`
+	Subtitle   string         `json:"subtitle,omitempty"`
+	Assets     []publicAsset  `json:"assets,omitempty"`
+	NextCursor *int           `json:"next_cursor,omitempty"`
+	Total      *int           `json:"total,omitempty"`
+	Trips      []publicTrip   `json:"trips,omitempty"`
+	ShareNote  string         `json:"share_note,omitempty"`
+	From       *forwarderInfo `json:"forwarded_from,omitempty"`
+}
+
+type publicAssetPage struct {
+	Assets     []publicAsset `json:"assets"`
+	NextCursor *int          `json:"next_cursor"`
+	Total      *int          `json:"total,omitempty"`
 }
 
 type publicTrip struct {
@@ -96,26 +104,84 @@ func (h *Handler) PublicScope(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	assets, err := h.scopedAssets(c, link)
+	_, limit := parseAssetPagination(c)
+	assets, nextCursor, total, err := h.scopedAssetsPage(ctx, link, 0, limit)
 	if err != nil {
 		return err
 	}
 
 	out := publicScopeResp{
-		Scope:     string(link.Scope),
-		TripID:    t.ID,
-		Title:     t.Title,
-		Subtitle:  t.Location,
-		ShareNote: link.Note,
+		Scope:      string(link.Scope),
+		TripID:     t.ID,
+		Title:      t.Title,
+		Subtitle:   t.Location,
+		ShareNote:  link.Note,
+		NextCursor: nextCursor,
+		Total:      total,
 	}
-	out.Assets = make([]publicAsset, len(assets))
+	out.Assets = h.buildPublicAssets(ctx, t, assets)
+	return c.JSON(http.StatusOK, out)
+}
 
-	// Per-asset view counts (only when trip toggle is on).
+// PublicListAssets returns the next page of assets for the current share
+// session. Used by infinite scroll once the visitor has scrolled past the
+// first page embedded in /public/scope (or /public/trips/:id).
+func (h *Handler) PublicListAssets(c echo.Context) error {
+	sess := auth.MustShareSession(c)
+	ctx := c.Request().Context()
+	link, err := h.loadActiveShare(ctx, sess.ShareID)
+	if err != nil {
+		return err
+	}
+	cursor, limit := parseAssetPagination(c)
+
+	// In a multi-share, the caller must specify which trip they're paging in.
+	tripIDParam := 0
+	if v := c.QueryParam("trip_id"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			tripIDParam = n
+		}
+	}
+	if link.Scope == sharelink.ScopeMulti {
+		if tripIDParam == 0 || !h.shareCoversTrip(ctx, link, tripIDParam) {
+			return echo.NewHTTPError(http.StatusForbidden, "trip not in scope")
+		}
+		t, err := h.DB.Trip.Get(ctx, tripIDParam)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "trip not found")
+		}
+		assets, nextCursor, total, err := h.pagedScopedAssets(ctx, &scopeFilter{tripID: tripIDParam}, cursor, limit)
+		if err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, publicAssetPage{
+			Assets:     h.buildPublicAssets(ctx, t, assets),
+			NextCursor: nextCursor,
+			Total:      total,
+		})
+	}
+
+	t, err := h.DB.Trip.Get(ctx, link.TripID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "trip not found")
+	}
+	assets, nextCursor, total, err := h.scopedAssetsPage(ctx, link, cursor, limit)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, publicAssetPage{
+		Assets:     h.buildPublicAssets(ctx, t, assets),
+		NextCursor: nextCursor,
+		Total:      total,
+	})
+}
+
+func (h *Handler) buildPublicAssets(ctx context.Context, t *ent.Trip, assets []*ent.Asset) []publicAsset {
+	out := make([]publicAsset, len(assets))
 	var counts map[int]int
 	if t.ShowViewCounts {
-		counts = h.assetViewCounts(c.Request().Context(), assetIDs(assets))
+		counts = h.assetViewCounts(ctx, assetIDs(assets))
 	}
-
 	for i, a := range assets {
 		pa := publicAsset{
 			ID:          a.ID,
@@ -131,9 +197,9 @@ func (h *Handler) PublicScope(c echo.Context) error {
 			n := counts[a.ID]
 			pa.ViewCount = &n
 		}
-		out.Assets[i] = pa
+		out[i] = pa
 	}
-	return c.JSON(http.StatusOK, out)
+	return out
 }
 
 // PublicAssetEXIF returns cached EXIF / image-info metadata for an asset that
@@ -180,42 +246,21 @@ func (h *Handler) PublicTripScope(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "trip not found")
 	}
-	assets, err := h.DB.Asset.Query().
-		Where(asset.TripIDEQ(id)).
-		Order(ent.Desc(asset.FieldID)).
-		All(ctx)
+	_, limit := parseAssetPagination(c)
+	assets, nextCursor, total, err := h.pagedScopedAssets(ctx, &scopeFilter{tripID: id}, 0, limit)
 	if err != nil {
 		return err
 	}
 	out := publicScopeResp{
-		Scope:     "trip",
-		TripID:    t.ID,
-		Title:     t.Title,
-		Subtitle:  t.Location,
-		ShareNote: link.Note,
+		Scope:      "trip",
+		TripID:     t.ID,
+		Title:      t.Title,
+		Subtitle:   t.Location,
+		ShareNote:  link.Note,
+		NextCursor: nextCursor,
+		Total:      total,
 	}
-	out.Assets = make([]publicAsset, len(assets))
-	var counts map[int]int
-	if t.ShowViewCounts {
-		counts = h.assetViewCounts(ctx, assetIDs(assets))
-	}
-	for i, a := range assets {
-		pa := publicAsset{
-			ID:          a.ID,
-			Kind:        string(a.Kind),
-			Width:       a.Width,
-			Height:      a.Height,
-			Duration:    a.DurationMs,
-			HLSStatus:   string(a.HlsStatus),
-			IsLivePhoto: a.IsLivePhoto,
-			URLs:        h.signAssetURLs(a),
-		}
-		if counts != nil {
-			n := counts[a.ID]
-			pa.ViewCount = &n
-		}
-		out.Assets[i] = pa
-	}
+	out.Assets = h.buildPublicAssets(ctx, t, assets)
 	return c.JSON(http.StatusOK, out)
 }
 
@@ -511,21 +556,61 @@ func toViewKind(s string) assetview.Kind {
 	}
 }
 
-func (h *Handler) scopedAssets(c echo.Context, link *ent.ShareLink) ([]*ent.Asset, error) {
-	if link.Scope == sharelink.ScopeAsset && link.AssetID != nil {
-		a, err := h.DB.Asset.Get(c.Request().Context(), *link.AssetID)
+// scopeFilter narrows pagedScopedAssets to a specific trip and optionally a
+// collection. tripID must be set; collectionID == 0 means "no collection
+// filter".
+type scopeFilter struct {
+	tripID       int
+	collectionID int
+}
+
+func (h *Handler) pagedScopedAssets(ctx context.Context, sf *scopeFilter, cursor, limit int) (rows []*ent.Asset, nextCursor *int, total *int, err error) {
+	q := h.DB.Asset.Query().Where(asset.TripIDEQ(sf.tripID))
+	if sf.collectionID > 0 {
+		q = q.Where(asset.HasCollectionsWith(collection.IDEQ(sf.collectionID)))
+	}
+	totalQ := q.Clone()
+	if cursor > 0 {
+		q = q.Where(asset.IDLT(cursor))
+	}
+	rows, err = q.Order(ent.Desc(asset.FieldID)).Limit(limit).All(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(rows) == limit {
+		next := rows[len(rows)-1].ID
+		nextCursor = &next
+	}
+	if cursor == 0 {
+		n, err := totalQ.Count(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		return []*ent.Asset{a}, nil
+		total = &n
 	}
-	q := h.DB.Asset.Query().
-		Where(asset.TripIDEQ(link.TripID)).
-		Order(ent.Desc(asset.FieldID))
+	return rows, nextCursor, total, nil
+}
+
+// scopedAssetsPage returns a paginated slice of the assets that the given
+// share link covers. For ScopeAsset (single-asset shares) pagination is a
+// no-op — there's only ever one item.
+func (h *Handler) scopedAssetsPage(ctx context.Context, link *ent.ShareLink, cursor, limit int) ([]*ent.Asset, *int, *int, error) {
+	if link.Scope == sharelink.ScopeAsset && link.AssetID != nil {
+		if cursor > 0 {
+			return nil, nil, nil, nil
+		}
+		a, err := h.DB.Asset.Get(ctx, *link.AssetID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		one := 1
+		return []*ent.Asset{a}, nil, &one, nil
+	}
+	sf := &scopeFilter{tripID: link.TripID}
 	if link.Scope == sharelink.ScopeCollection && link.CollectionID != nil {
-		q = q.Where(asset.HasCollectionsWith(collection.IDEQ(*link.CollectionID)))
+		sf.collectionID = *link.CollectionID
 	}
-	return q.All(c.Request().Context())
+	return h.pagedScopedAssets(ctx, sf, cursor, limit)
 }
 
 func (h *Handler) assetViewCounts(ctx context.Context, ids []int) map[int]int {

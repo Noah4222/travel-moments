@@ -116,6 +116,7 @@ func New(cfg *config.Config, client *ent.Client, logger *slog.Logger) *echo.Echo
 	trips.GET("", h.ListTrips)
 	trips.GET("/:id", h.GetTrip)
 	trips.GET("/:id/assets", h.ListAssets)
+	trips.GET("/:id/asset-ids", h.ListAssetIDs)
 	trips.POST("/:id/assets/reorder", h.ReorderAssets)
 	// Mutations admin-only
 	tripsAdmin := api.Group("/trips", auth.RequireRole(auth.RoleAdmin))
@@ -168,6 +169,7 @@ func New(cfg *config.Config, client *ent.Client, logger *slog.Logger) *echo.Echo
 	pub := api.Group("/public", auth.RequireShareSession)
 	pub.GET("/scope", h.PublicScope)
 	pub.GET("/trips/:id", h.PublicTripScope)
+	pub.GET("/assets", h.PublicListAssets)
 	pub.GET("/assets/:id/url", h.PublicAssetURL)
 	pub.GET("/assets/:id/exif", h.PublicAssetEXIF)
 	pub.POST("/forward", h.PublicForward)

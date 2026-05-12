@@ -13,10 +13,8 @@ import { composeCollectionShareCopy } from "@/lib/clipboard";
 
 export function CollectionsPanel({
   tripId,
-  assets,
 }: {
   tripId: number;
-  assets: Asset[];
 }) {
   const [list, setList] = useState<Collection[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -70,7 +68,6 @@ export function CollectionsPanel({
       {creating && (
         <CollectionForm
           tripId={tripId}
-          assets={assets}
           onDone={() => {
             setCreating(false);
             reload();
@@ -82,7 +79,6 @@ export function CollectionsPanel({
       {editing && (
         <CollectionForm
           tripId={tripId}
-          assets={assets}
           initial={editing}
           onDone={() => {
             setEditing(null);
@@ -168,13 +164,11 @@ export function CollectionsPanel({
 
 function CollectionForm({
   tripId,
-  assets,
   initial,
   onDone,
   onCancel,
 }: {
   tripId: number;
-  assets: Asset[];
   initial?: Collection;
   onDone: () => void;
   onCancel: () => void;
@@ -184,9 +178,32 @@ function CollectionForm({
   const [selected, setSelected] = useState<Set<number>>(
     () => new Set(initial?.asset_ids ?? []),
   );
+  const [assets, setAssets] = useState<Asset[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isEdit = !!initial;
+
+  // Paginated fetch of every asset in the trip — collection picker needs the
+  // full list, but the trip view only loads the first page.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const all: Asset[] = [];
+      let cursor: number | undefined;
+      do {
+        const page = await api.listAssets(tripId, { cursor, limit: 200 });
+        if (cancelled) return;
+        all.push(...page.assets);
+        cursor = page.next_cursor ?? undefined;
+      } while (cursor);
+      if (!cancelled) setAssets(all);
+    })().catch(() => {
+      if (!cancelled) setAssets([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId]);
 
   function toggle(id: number) {
     setSelected((cur) => {
@@ -240,7 +257,12 @@ function CollectionForm({
           选择资源（点击切换） · 已选 {selected.size} 张
         </Label>
         <ul className="grid max-h-64 grid-cols-4 gap-1.5 overflow-auto rounded-md border border-zinc-200 p-1.5 sm:grid-cols-6 md:grid-cols-8 dark:border-zinc-800">
-          {assets.map((a) => (
+          {assets == null && (
+            <li className="col-span-full py-4 text-center text-xs text-zinc-500">
+              加载所有资源…
+            </li>
+          )}
+          {(assets ?? []).map((a) => (
             <li
               key={a.id}
               onClick={() => toggle(a.id)}

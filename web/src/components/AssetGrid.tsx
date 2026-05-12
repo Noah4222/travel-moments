@@ -1,9 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Asset } from "@/lib/api";
 import { Badge, Button, Card, Input } from "./ui";
 import { PicturePreview } from "./PicturePreview";
 import { cn } from "@/lib/cn";
 import { copyText, composeAssetShareCopy } from "@/lib/clipboard";
+import { Spinner } from "./Spinner";
 
 export function AssetGrid({
   assets,
@@ -13,6 +14,13 @@ export function AssetGrid({
   onBulkDelete,
   onClick,
   onCoverChange,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+  /** Total count across all pages (for the "全选 / 共 N 张" UI). */
+  total,
+  /** Fetch every asset id in the trip — used to "全选" across unloaded pages. */
+  fetchAllIDs,
 }: {
   assets: Asset[];
   isAdmin: boolean;
@@ -22,11 +30,42 @@ export function AssetGrid({
   onBulkDelete?: (ids: number[]) => Promise<void>;
   onClick?: (a: Asset) => void;
   onCoverChange?: () => void | Promise<void>;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+  total?: number | null;
+  fetchAllIDs?: () => Promise<number[]>;
 }) {
   const [shareInfo, setShareInfo] = useState<{ url: string } | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState<{ done: number; total: number } | null>(null);
+  const [selectingAll, setSelectingAll] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // IntersectionObserver-driven infinite scroll: when the bottom sentinel is
+  // near the viewport and there's another page, trigger onLoadMore.
+  useEffect(() => {
+    if (!onLoadMore || !hasMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            onLoadMore();
+            break;
+          }
+        }
+      },
+      { rootMargin: "400px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [onLoadMore, hasMore, loadingMore]);
+
+  const totalKnown = total ?? assets.length;
+  const allSelected = selected.size >= totalKnown && totalKnown > 0;
 
   function toggle(id: number) {
     setSelected((cur) => {
@@ -94,7 +133,11 @@ export function AssetGrid({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           {!selectMode ? (
             <>
-              <p className="text-xs text-zinc-500">{assets.length} 个资源</p>
+              <p className="text-xs text-zinc-500">
+                {total != null && total !== assets.length
+                  ? `${assets.length} / ${total} 个资源`
+                  : `${assets.length} 个资源`}
+              </p>
               <Button size="sm" variant="outline" onClick={() => setSelectMode(true)}>
                 批量选择
               </Button>
@@ -102,21 +145,33 @@ export function AssetGrid({
           ) : (
             <>
               <p className="text-sm">
-                已选 <b>{selected.size}</b> / {assets.length}
+                已选 <b>{selected.size}</b> / {totalKnown}
               </p>
               <div className="flex flex-wrap gap-1.5">
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() =>
-                    setSelected(
-                      selected.size === assets.length
-                        ? new Set()
-                        : new Set(assets.map((a) => a.id)),
-                    )
-                  }
+                  disabled={selectingAll}
+                  onClick={async () => {
+                    if (allSelected) {
+                      setSelected(new Set());
+                      return;
+                    }
+                    // Cross-page select-all: pull every asset id when paginated.
+                    if (fetchAllIDs && total != null && total > assets.length) {
+                      setSelectingAll(true);
+                      try {
+                        const ids = await fetchAllIDs();
+                        setSelected(new Set(ids));
+                      } finally {
+                        setSelectingAll(false);
+                      }
+                    } else {
+                      setSelected(new Set(assets.map((a) => a.id)));
+                    }
+                  }}
                 >
-                  {selected.size === assets.length ? "全不选" : "全选"}
+                  {selectingAll ? "…" : allSelected ? "全不选" : "全选"}
                 </Button>
                 <Button
                   size="sm"
@@ -154,6 +209,25 @@ export function AssetGrid({
           />
         ))}
       </ul>
+      {(hasMore || loadingMore) && (
+        <div
+          ref={sentinelRef}
+          className="flex items-center justify-center gap-2 py-6 text-sm text-zinc-500"
+        >
+          {loadingMore ? (
+            <>
+              <Spinner className="h-4 w-4" /> 加载更多…
+            </>
+          ) : (
+            <span>下滑加载更多</span>
+          )}
+        </div>
+      )}
+      {!hasMore && total != null && total > 0 && assets.length >= total && (
+        <p className="py-6 text-center text-xs text-zinc-400">
+          — 共 {total} 个资源，到底啦 —
+        </p>
+      )}
       {shareInfo && (
         <SingleShareDialog url={shareInfo.url} onClose={() => setShareInfo(null)} />
       )}

@@ -28,6 +28,10 @@ type Props = {
   onIndexChange?: (i: number) => void;
   /** Hide nav arrows (e.g. single-asset share page). */
   singleMode?: boolean;
+  /** Pagination — when set, swiping past the end triggers the next page. */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 };
 
 export function Lightbox({
@@ -37,6 +41,9 @@ export function Lightbox({
   onClose,
   onIndexChange,
   singleMode,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: Props) {
   const [index, setIndex] = useState(initialIndex);
   const [autoPlay, setAutoPlay] = useState(false);
@@ -58,6 +65,13 @@ export function Lightbox({
     },
     [index, assets.length, onIndexChange],
   );
+
+  // Prefetch the next page when the viewer is within 2 items of the loaded
+  // tail, so left/right swiping never hits an empty wall.
+  useEffect(() => {
+    if (!hasMore || loadingMore || !onLoadMore) return;
+    if (index >= assets.length - 3) onLoadMore();
+  }, [index, assets.length, hasMore, loadingMore, onLoadMore]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
