@@ -271,6 +271,36 @@ export const api = {
   shareStats: (id: number) => apiFetch<ShareStats>(`/shares/${id}/stats`),
   shareTree: (id: number) => apiFetch<ShareTreeNode>(`/shares/${id}/tree`),
 
+  // ---- audit (admin) ----
+  auditEvents: (opts: {
+    before?: string;
+    beforeID?: number;
+    limit?: number;
+    tripID?: number;
+    shareID?: number;
+    ip?: string;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.before) qs.set("before", opts.before);
+    if (opts.beforeID != null) qs.set("before_id", String(opts.beforeID));
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    if (opts.tripID) qs.set("trip_id", String(opts.tripID));
+    if (opts.shareID) qs.set("share_id", String(opts.shareID));
+    if (opts.ip) qs.set("ip", opts.ip);
+    const s = qs.toString();
+    return apiFetch<AuditEventsResp>(`/admin/audit/events${s ? `?${s}` : ""}`);
+  },
+  auditShares: (opts: { status?: string; order?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.status) qs.set("status", opts.status);
+    if (opts.order) qs.set("order", opts.order);
+    if (opts.q) qs.set("q", opts.q);
+    const s = qs.toString();
+    return apiFetch<AuditSharesResp>(`/admin/audit/shares${s ? `?${s}` : ""}`);
+  },
+  auditTrips: () => apiFetch<AuditTripsResp>("/admin/audit/trips"),
+  auditTripDetail: (id: number) => apiFetch<AuditTripDetail>(`/admin/audit/trips/${id}`),
+
   // ---- public (no auth header; relies on share session cookie) ----
   authShare: (code: string, password: string) =>
     apiFetch<{
@@ -532,6 +562,71 @@ export type ShareStats = {
     referer?: string;
     visited_at: string;
   }[];
+};
+
+export type AuditEvent = {
+  visit_id: number;
+  share_id: number;
+  share_code: string;
+  trip_id: number;
+  trip_title: string;
+  ip: string;
+  ua: string;
+  country: string;
+  referer: string;
+  visited_at: string;
+  asset_view_count: number;
+  is_share_creator: boolean;
+};
+
+export type AuditEventsResp = {
+  events: AuditEvent[];
+  next_before: string | null;
+  next_before_id: number | null;
+};
+
+export type AuditShareRow = {
+  id: number;
+  code: string;
+  scope: string;
+  note: string;
+  trip_id: number;
+  trip_title: string;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  visits: number;
+  unique_ips: number;
+  child_count: number;
+  last_visit_at: string | null;
+  disable_forward: boolean;
+};
+
+export type AuditSharesResp = { shares: AuditShareRow[] };
+
+export type AuditTripRow = {
+  trip_id: number;
+  title: string;
+  share_count: number;
+  total_visits: number;
+  unique_visitors: number;
+  last_visit_at: string | null;
+};
+
+export type AuditTripsResp = { trips: AuditTripRow[] };
+
+export type AuditDaily = { date: string; visits: number; unique_ips: number };
+export type AuditTopAsset = { asset_id: number; views: number; thumb_url: ImgURLs | null };
+export type AuditRefererRow = { host: string; count: number };
+export type AuditCountryRow = { code: string; count: number };
+
+export type AuditTripDetail = {
+  trip: { id: number; title: string; created_at: string };
+  shares: AuditShareRow[];
+  daily: AuditDaily[];
+  top_assets: AuditTopAsset[];
+  referers: AuditRefererRow[];
+  countries: AuditCountryRow[];
 };
 
 export type ShareTreeNode = {
