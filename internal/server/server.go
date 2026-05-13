@@ -189,6 +189,13 @@ func New(cfg *config.Config, client *ent.Client, logger *slog.Logger) *echo.Echo
 	adminCmt.POST("/:id/hide", h.AdminHideComment)
 	adminCmt.POST("/:id/unhide", h.AdminUnhideComment)
 
+	// Admin audit (cross-trip access tracking)
+	adminAudit := api.Group("/admin/audit", auth.RequireRole(auth.RoleAdmin))
+	adminAudit.GET("/events", h.AuditEvents)
+	adminAudit.GET("/shares", h.AuditShares)
+	adminAudit.GET("/trips", h.AuditTrips)
+	adminAudit.GET("/trips/:id", h.AuditTripDetail)
+
 	// MPS callback (real upstream is 阿里云 MPS; treat as untrusted boundary)
 	api.POST("/oss/mps-callback", h.MPSCallback)
 

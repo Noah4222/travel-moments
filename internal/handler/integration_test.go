@@ -152,6 +152,13 @@ func mountAPI(e *echo.Echo, jwt *auth.JWT, h *handler.Handler) {
 	pub.GET("/scope", h.PublicScope)
 	pub.GET("/assets/:id/url", h.PublicAssetURL)
 	pub.POST("/forward", h.PublicForward)
+
+	// Admin audit (matches prod: admin only)
+	audit := api.Group("/admin/audit", auth.RequireRole(auth.RoleAdmin))
+	audit.GET("/events", h.AuditEvents)
+	audit.GET("/shares", h.AuditShares)
+	audit.GET("/trips", h.AuditTrips)
+	audit.GET("/trips/:id", h.AuditTripDetail)
 }
 
 func jsonErrorHandler(err error, c echo.Context) {
