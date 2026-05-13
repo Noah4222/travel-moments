@@ -485,39 +485,67 @@ function postToOSSOnce(
     }
     fd.append("file", file);
 
+    const fileInfo = `${file.name} (${file.type || "?"}, ${file.size}B)`;
     const xhr = new XMLHttpRequest();
     xhr.open("POST", policy.host, true);
     // 5 minutes per file — enough for 50 MB on 3G, but not infinite.
     xhr.timeout = 5 * 60 * 1000;
+    let lastProgress = 0;
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded / e.total);
+      if (e.lengthComputable) {
+        lastProgress = e.loaded / e.total;
+        onProgress(lastProgress);
+      }
+    };
+    // upload.onerror can carry a separate signal vs the overall xhr.onerror
+    // — log it independently so we don't miss it.
+    xhr.upload.onerror = () => {
+      console.error("[upload] xhr.upload.onerror", { file: fileInfo, host: policy.host });
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
         return;
       }
-      // OSS returns descriptive XML errors — surface a usable slice.
       const body = (xhr.responseText || "").trim();
       const msg = extractOSSError(body) || body.slice(0, 200);
-      const err = new Error(`OSS ${xhr.status}: ${msg}`) as Error & {
+      console.error("[upload] OSS rejected", {
+        status: xhr.status,
+        statusText: xhr.statusText,
+        body: body.slice(0, 800),
+        file: fileInfo,
+        host: policy.host,
+        key: policy.key,
+      });
+      const err = new Error(`OSS ${xhr.status}: ${msg || xhr.statusText}`) as Error & {
         transient?: boolean;
       };
-      // 408 / 429 / 5xx are retryable; 4xx is policy/auth and should stop.
       err.transient =
         xhr.status === 408 || xhr.status === 429 || xhr.status >= 500;
       reject(err);
     };
     xhr.onerror = () => {
+      console.error("[upload] xhr.onerror", {
+        readyState: xhr.readyState,
+        status: xhr.status,
+        statusText: xhr.statusText,
+        progress: lastProgress,
+        file: fileInfo,
+        host: policy.host,
+        online: typeof navigator !== "undefined" ? navigator.onLine : null,
+      });
+      const tail =
+        lastProgress > 0 && lastProgress < 1
+          ? `（已传 ${Math.round(lastProgress * 100)}%）`
+          : "（连接还没开始）";
       const err = new Error(
-        diagnoseNetworkError(
-          "上传中断 — 检查网络（手机切换 Wi-Fi/蜂窝、锁屏会断连）",
-        ),
+        diagnoseNetworkError(`上传中断 ${tail}`),
       ) as Error & { transient?: boolean };
       err.transient = true;
       reject(err);
     };
     xhr.ontimeout = () => {
+      console.error("[upload] xhr.ontimeout", { file: fileInfo, progress: lastProgress });
       const err = new Error("上传超时（>5 分钟）— 网络太慢或卡住，请重试") as Error & {
         transient?: boolean;
       };
