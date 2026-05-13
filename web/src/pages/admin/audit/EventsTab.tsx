@@ -10,8 +10,27 @@ export function EventsTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tripID, setTripID] = useState("");
+  const [shareID, setShareID] = useState("");
   const [ip, setIP] = useState("");
+  const [debouncedTripID, setDebouncedTripID] = useState("");
+  const [debouncedShareID, setDebouncedShareID] = useState("");
+  const [debouncedIP, setDebouncedIP] = useState("");
   const [selected, setSelected] = useState<AuditEvent | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTripID(tripID), 300);
+    return () => clearTimeout(t);
+  }, [tripID]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedShareID(shareID), 300);
+    return () => clearTimeout(t);
+  }, [shareID]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedIP(ip.trim()), 300);
+    return () => clearTimeout(t);
+  }, [ip]);
 
   async function load(reset: boolean, cursor?: { before: string | null; beforeID: number | null }) {
     setLoading(true);
@@ -20,8 +39,9 @@ export function EventsTab() {
       const resp = await api.auditEvents({
         before: reset ? undefined : cursor?.before ?? undefined,
         beforeID: reset ? undefined : cursor?.beforeID ?? undefined,
-        tripID: tripID ? Number(tripID) : undefined,
-        ip: ip || undefined,
+        tripID: debouncedTripID ? Number(debouncedTripID) : undefined,
+        shareID: debouncedShareID ? Number(debouncedShareID) : undefined,
+        ip: debouncedIP || undefined,
         limit: 50,
       });
       setEvents((prev) => (reset ? resp.events : [...prev, ...resp.events]));
@@ -42,11 +62,11 @@ export function EventsTab() {
     setDone(false);
     void load(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tripID, ip]);
+  }, [debouncedTripID, debouncedShareID, debouncedIP]);
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <div>
           <Label>Trip ID</Label>
           <Input
@@ -54,6 +74,15 @@ export function EventsTab() {
             value={tripID}
             onChange={(e) => setTripID(e.target.value.replace(/[^0-9]/g, ""))}
             placeholder="例如 12"
+          />
+        </div>
+        <div>
+          <Label>Share ID</Label>
+          <Input
+            inputMode="numeric"
+            value={shareID}
+            onChange={(e) => setShareID(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder="例如 34"
           />
         </div>
         <div className="sm:col-span-2">
