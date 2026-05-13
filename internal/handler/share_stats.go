@@ -79,6 +79,10 @@ func (h *Handler) ShareStats(c echo.Context) error {
 		Visits:          len(visits),
 		UniqueIPs:       len(ipSet),
 		ChildShareCount: childCount,
+		// Ensure JSON renders `[]` instead of `null` even when there are no
+		// visits/views yet — the frontend assumes these are always arrays.
+		TopAssets:    []topAssetStat{},
+		RecentVisits: []recentVisit{},
 	}
 
 	if len(visitIDs) > 0 {

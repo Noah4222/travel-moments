@@ -283,13 +283,25 @@ function DownloadButton({ asset, mode }: { asset: LightboxAsset; mode: Mode }) {
         e.stopPropagation();
         setBusy(true);
         try {
-          let url: string | undefined;
-          if (mode === "admin") {
-            url = asset.urls?.download;
-          } else {
-            url = (await api.publicAssetURL(asset.id, "download")).url;
-          }
-          if (url) window.open(url, "_blank");
+          // Always fetch a fresh signed URL — admin's cached urls.download
+          // may have ticked past the OSS expiry by the time the user clicks.
+          const r =
+            mode === "admin"
+              ? await api.adminAssetURL(asset.id, "download")
+              : await api.publicAssetURL(asset.id, "download");
+          if (!r.url) return;
+          // Use an anchor click rather than window.open: the latter gets
+          // blocked by Safari / Chrome popup heuristics after an `await`
+          // (since the click context has been lost).
+          const a = document.createElement("a");
+          a.href = r.url;
+          a.rel = "noopener";
+          // download="" hints the browser to save instead of navigate even
+          // if Content-Disposition is missing; the URL already sets it too.
+          a.download = "";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
         } finally {
           setBusy(false);
         }
