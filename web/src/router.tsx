@@ -12,6 +12,8 @@ import { UploadPage } from "@/pages/public/Upload";
 import { SettingsPage } from "@/pages/admin/Settings";
 import { TripPreviewPage } from "@/pages/admin/TripPreview";
 import { SplashPage } from "@/pages/Splash";
+import { AuditPage } from "@/pages/admin/Audit";
+import { TripAuditDetail } from "@/pages/admin/audit/TripAuditDetail";
 
 function RequireAuth({
   children,
@@ -83,6 +85,22 @@ export function AppRoutes() {
           element={
             <RequireAuth role="admin">
               <SettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/audit"
+          element={
+            <RequireAuth role="admin">
+              <AuditPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/audit/trip/:id"
+          element={
+            <RequireAuth role="admin">
+              <TripAuditDetail />
             </RequireAuth>
           }
         />

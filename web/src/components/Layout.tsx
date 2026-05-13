@@ -26,6 +26,7 @@ export function AppLayout() {
               <>
                 <NavTab to="/admin">相册</NavTab>
                 {user.role === "admin" && <NavTab to="/admin/users">用户</NavTab>}
+                {user.role === "admin" && <NavTab to="/admin/audit">访问追溯</NavTab>}
                 {user.role === "admin" && <NavTab to="/admin/settings">设置</NavTab>}
               </>
             )}
@@ -79,6 +80,11 @@ export function AppLayout() {
                   {user.role === "admin" && (
                     <MobileNav to="/admin/users" onClick={closeMenu}>
                       用户
+                    </MobileNav>
+                  )}
+                  {user.role === "admin" && (
+                    <MobileNav to="/admin/audit" onClick={closeMenu}>
+                      访问追溯
                     </MobileNav>
                   )}
                   {user.role === "admin" && (
