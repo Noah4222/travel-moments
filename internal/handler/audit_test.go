@@ -305,6 +305,204 @@ func TestAuditEventsFiltersAndFields(t *testing.T) {
 	}
 }
 
+// ---- Task 3: AuditShares tests ----
+
+type auditShareRow struct {
+	ID           int        `json:"id"`
+	Code         string     `json:"code"`
+	Scope        string     `json:"scope"`
+	Note         string     `json:"note"`
+	TripID       int        `json:"trip_id"`
+	TripTitle    string     `json:"trip_title"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ExpiresAt    *time.Time `json:"expires_at"`
+	RevokedAt    *time.Time `json:"revoked_at"`
+	Visits       int        `json:"visits"`
+	UniqueIPs    int        `json:"unique_ips"`
+	ChildCount   int        `json:"child_count"`
+	LastVisitAt  *time.Time `json:"last_visit_at"`
+	DisableForwd bool       `json:"disable_forward"`
+}
+type auditSharesResp struct {
+	Shares []auditShareRow `json:"shares"`
+}
+
+func auditShareByCode(rows []auditShareRow, code string) *auditShareRow {
+	for i := range rows {
+		if rows[i].Code == code {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func TestAuditSharesAggregation(t *testing.T) {
+	te := newTestEnv(t)
+	adminID := te.seedUser(user.RoleAdmin, "admin", "pw")
+	tok := te.login("admin", "pw")
+	ctx := t.Context()
+
+	trip1, err := te.client.Trip.Create().
+		SetSlug("trip1").SetTitle("T1").SetCreatedByID(adminID).Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trip2, err := te.client.Trip.Create().
+		SetSlug("trip2").SetTitle("T2").SetCreatedByID(adminID).Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+
+	// Share A on trip1 — active.
+	shareA, err := te.client.ShareLink.Create().
+		SetScope(sharelink.ScopeTrip).
+		SetTripID(trip1.ID).
+		SetCode("A").
+		SetPasswordHash("x").
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Child share Achild — also active.
+	_, err = te.client.ShareLink.Create().
+		SetScope(sharelink.ScopeTrip).
+		SetTripID(trip1.ID).
+		SetCode("Achild").
+		SetPasswordHash("x").
+		SetParentShareID(shareA.ID).
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 3 visits on A — 2 unique IPs.
+	for i, ip := range []string{"1.1.1.1", "1.1.1.1", "2.2.2.2"} {
+		if _, err := te.client.Visit.Create().
+			SetShareID(shareA.ID).
+			SetSessionID(fmt.Sprintf("a-%d", i)).
+			SetIP(ip).
+			SetVisitedAt(now.Add(time.Duration(i) * time.Second)).
+			Save(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Share B on trip2 — revoked.
+	shareB, err := te.client.ShareLink.Create().
+		SetScope(sharelink.ScopeTrip).
+		SetTripID(trip2.ID).
+		SetCode("B").
+		SetPasswordHash("x").
+		SetRevokedAt(now.Add(-30 * time.Second)).
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := te.client.Visit.Create().
+		SetShareID(shareB.ID).
+		SetSessionID("b-0").
+		SetIP("3.3.3.3").
+		SetVisitedAt(now).
+		Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Share C on trip2 — expired.
+	_, err = te.client.ShareLink.Create().
+		SetScope(sharelink.ScopeTrip).
+		SetTripID(trip2.ID).
+		SetCode("C").
+		SetPasswordHash("x").
+		SetExpiresAt(now.Add(-time.Hour)).
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Default status=active → A + Achild.
+	r := te.do("GET", "/api/admin/audit/shares", tok, nil, "")
+	var resp auditSharesResp
+	mustDecode(t, r, &resp)
+	r.Body.Close()
+	if len(resp.Shares) != 2 {
+		t.Fatalf("active: want 2 shares, got %d", len(resp.Shares))
+	}
+	codes := map[string]bool{}
+	for _, s := range resp.Shares {
+		codes[s.Code] = true
+	}
+	if !codes["A"] || !codes["Achild"] {
+		t.Fatalf("active: want A and Achild, got %v", codes)
+	}
+	if codes["B"] || codes["C"] {
+		t.Fatalf("active: must not include B or C, got %v", codes)
+	}
+
+	rowA := auditShareByCode(resp.Shares, "A")
+	if rowA == nil {
+		t.Fatalf("active: row A missing")
+	}
+	if rowA.Visits != 3 {
+		t.Fatalf("A.visits: want 3, got %d", rowA.Visits)
+	}
+	if rowA.UniqueIPs != 2 {
+		t.Fatalf("A.unique_ips: want 2, got %d", rowA.UniqueIPs)
+	}
+	if rowA.ChildCount != 1 {
+		t.Fatalf("A.child_count: want 1, got %d", rowA.ChildCount)
+	}
+	if rowA.TripTitle != "T1" {
+		t.Fatalf("A.trip_title: want T1, got %q", rowA.TripTitle)
+	}
+	if rowA.LastVisitAt == nil {
+		t.Fatalf("A.last_visit_at: want non-nil")
+	}
+
+	// status=all → 4 shares.
+	r = te.do("GET", "/api/admin/audit/shares?status=all", tok, nil, "")
+	var allResp auditSharesResp
+	mustDecode(t, r, &allResp)
+	r.Body.Close()
+	if len(allResp.Shares) != 4 {
+		t.Fatalf("all: want 4 shares, got %d", len(allResp.Shares))
+	}
+
+	// status=revoked → just B.
+	r = te.do("GET", "/api/admin/audit/shares?status=revoked", tok, nil, "")
+	var revResp auditSharesResp
+	mustDecode(t, r, &revResp)
+	r.Body.Close()
+	if len(revResp.Shares) != 1 || revResp.Shares[0].Code != "B" {
+		t.Fatalf("revoked: want [B], got %+v", revResp.Shares)
+	}
+
+	// status=expired → just C.
+	r = te.do("GET", "/api/admin/audit/shares?status=expired", tok, nil, "")
+	var expResp auditSharesResp
+	mustDecode(t, r, &expResp)
+	r.Body.Close()
+	if len(expResp.Shares) != 1 || expResp.Shares[0].Code != "C" {
+		t.Fatalf("expired: want [C], got %+v", expResp.Shares)
+	}
+
+	// order=visits over all → A is first (3 visits).
+	r = te.do("GET", "/api/admin/audit/shares?status=all&order=visits", tok, nil, "")
+	var ordResp auditSharesResp
+	mustDecode(t, r, &ordResp)
+	r.Body.Close()
+	if len(ordResp.Shares) == 0 || ordResp.Shares[0].Code != "A" {
+		t.Fatalf("order=visits: want A first, got %+v", ordResp.Shares)
+	}
+
+	// bad status → 400.
+	r = te.do("GET", "/api/admin/audit/shares?status=bogus", tok, nil, "")
+	r.Body.Close()
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad status: want 400, got %d", r.StatusCode)
+	}
+}
+
 func TestAuditEventsDeletedTrip(t *testing.T) {
 	te := newTestEnv(t)
 	adminID := te.seedUser(user.RoleAdmin, "admin", "pw")

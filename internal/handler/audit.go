@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -264,8 +266,205 @@ func (h *Handler) shareIDsForTrip(ctx context.Context, tripID int) ([]int, error
 	return ids, nil
 }
 
+type auditShareRow struct {
+	ID             int        `json:"id"`
+	Code           string     `json:"code"`
+	Scope          string     `json:"scope"`
+	Note           string     `json:"note"`
+	TripID         int        `json:"trip_id"`
+	TripTitle      string     `json:"trip_title"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	RevokedAt      *time.Time `json:"revoked_at"`
+	Visits         int        `json:"visits"`
+	UniqueIPs      int        `json:"unique_ips"`
+	ChildCount     int        `json:"child_count"`
+	LastVisitAt    *time.Time `json:"last_visit_at"`
+	DisableForward bool       `json:"disable_forward"`
+}
+
+type auditSharesResp struct {
+	Shares []auditShareRow `json:"shares"`
+}
+
 func (h *Handler) AuditShares(c echo.Context) error {
-	return echo.NewHTTPError(http.StatusNotImplemented, "not implemented")
+	ctx := c.Request().Context()
+
+	status := c.QueryParam("status")
+	if status == "" {
+		status = "active"
+	}
+	switch status {
+	case "active", "expired", "revoked", "all":
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "bad status")
+	}
+
+	order := c.QueryParam("order")
+	if order == "" {
+		order = "recent_visit"
+	}
+	switch order {
+	case "recent_visit", "visits", "created":
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "bad order")
+	}
+
+	qstr := strings.ToLower(strings.TrimSpace(c.QueryParam("q")))
+
+	shares, err := h.DB.ShareLink.Query().All(ctx)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	// Filter by status + q.
+	filtered := make([]*ent.ShareLink, 0, len(shares))
+	for _, s := range shares {
+		// status
+		isRevoked := s.RevokedAt != nil
+		isExpired := !isRevoked && s.ExpiresAt != nil && s.ExpiresAt.Before(now)
+		isActive := !isRevoked && !isExpired
+		switch status {
+		case "active":
+			if !isActive {
+				continue
+			}
+		case "expired":
+			if !isExpired {
+				continue
+			}
+		case "revoked":
+			if !isRevoked {
+				continue
+			}
+		}
+		// q
+		if qstr != "" {
+			if !strings.Contains(strings.ToLower(s.Code), qstr) &&
+				!strings.Contains(strings.ToLower(s.Note), qstr) {
+				continue
+			}
+		}
+		filtered = append(filtered, s)
+	}
+
+	// Aggregate visits across all shares (one query, tally in Go).
+	type visitAgg struct {
+		count   int
+		ips     map[string]struct{}
+		lastVis *time.Time
+	}
+	aggByShare := make(map[int]*visitAgg)
+	visits, err := h.DB.Visit.Query().All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, v := range visits {
+		a, ok := aggByShare[v.ShareID]
+		if !ok {
+			a = &visitAgg{ips: make(map[string]struct{})}
+			aggByShare[v.ShareID] = a
+		}
+		a.count++
+		if v.IP != "" {
+			a.ips[v.IP] = struct{}{}
+		}
+		if a.lastVis == nil || v.VisitedAt.After(*a.lastVis) {
+			vt := v.VisitedAt
+			a.lastVis = &vt
+		}
+	}
+
+	// Child counts: parent_share_id values.
+	parentIDs, err := h.DB.ShareLink.Query().
+		Where(sharelink.ParentShareIDNotNil()).
+		Select(sharelink.FieldParentShareID).
+		Ints(ctx)
+	if err != nil {
+		return err
+	}
+	childCountByParent := make(map[int]int, len(parentIDs))
+	for _, pid := range parentIDs {
+		childCountByParent[pid]++
+	}
+
+	// Trip titles for filtered shares.
+	tripIDSet := make(map[int]struct{}, len(filtered))
+	for _, s := range filtered {
+		tripIDSet[s.TripID] = struct{}{}
+	}
+	tripIDs := make([]int, 0, len(tripIDSet))
+	for id := range tripIDSet {
+		tripIDs = append(tripIDs, id)
+	}
+	tripTitleByID := make(map[int]string, len(tripIDs))
+	if len(tripIDs) > 0 {
+		trips, err := h.DB.Trip.Query().Where(trip.IDIn(tripIDs...)).All(ctx)
+		if err != nil {
+			return err
+		}
+		for _, t := range trips {
+			tripTitleByID[t.ID] = t.Title
+		}
+	}
+
+	rows := make([]auditShareRow, 0, len(filtered))
+	for _, s := range filtered {
+		title, ok := tripTitleByID[s.TripID]
+		if !ok {
+			title = "(已删除)"
+		}
+		row := auditShareRow{
+			ID:             s.ID,
+			Code:           s.Code,
+			Scope:          string(s.Scope),
+			Note:           s.Note,
+			TripID:         s.TripID,
+			TripTitle:      title,
+			CreatedAt:      s.CreatedAt,
+			ExpiresAt:      s.ExpiresAt,
+			RevokedAt:      s.RevokedAt,
+			ChildCount:     childCountByParent[s.ID],
+			DisableForward: s.DisableForward,
+		}
+		if a := aggByShare[s.ID]; a != nil {
+			row.Visits = a.count
+			row.UniqueIPs = len(a.ips)
+			row.LastVisitAt = a.lastVis
+		}
+		rows = append(rows, row)
+	}
+
+	switch order {
+	case "visits":
+		sort.SliceStable(rows, func(i, j int) bool {
+			return rows[i].Visits > rows[j].Visits
+		})
+	case "created":
+		sort.SliceStable(rows, func(i, j int) bool {
+			return rows[i].CreatedAt.After(rows[j].CreatedAt)
+		})
+	case "recent_visit":
+		sort.SliceStable(rows, func(i, j int) bool {
+			a, b := rows[i].LastVisitAt, rows[j].LastVisitAt
+			if a == nil && b == nil {
+				return rows[i].CreatedAt.After(rows[j].CreatedAt)
+			}
+			if a == nil {
+				return false
+			}
+			if b == nil {
+				return true
+			}
+			if a.Equal(*b) {
+				return rows[i].CreatedAt.After(rows[j].CreatedAt)
+			}
+			return a.After(*b)
+		})
+	}
+
+	return c.JSON(http.StatusOK, auditSharesResp{Shares: rows})
 }
 
 func (h *Handler) AuditTrips(c echo.Context) error {
