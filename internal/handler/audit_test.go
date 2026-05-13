@@ -503,6 +503,146 @@ func TestAuditSharesAggregation(t *testing.T) {
 	}
 }
 
+// ---- Task 4: AuditTrips tests ----
+
+type auditTripRow struct {
+	TripID         int        `json:"trip_id"`
+	Title          string     `json:"title"`
+	ShareCount     int        `json:"share_count"`
+	TotalVisits    int        `json:"total_visits"`
+	UniqueVisitors int        `json:"unique_visitors"`
+	LastVisitAt    *time.Time `json:"last_visit_at"`
+}
+type auditTripsResp struct {
+	Trips []auditTripRow `json:"trips"`
+}
+
+func auditTripByID(rows []auditTripRow, id int) *auditTripRow {
+	for i := range rows {
+		if rows[i].TripID == id {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func TestAuditTripsAggregation(t *testing.T) {
+	te := newTestEnv(t)
+	adminID := te.seedUser(user.RoleAdmin, "admin", "pw")
+	tok := te.login("admin", "pw")
+	ctx := t.Context()
+
+	trip1, err := te.client.Trip.Create().
+		SetSlug("trip1").SetTitle("T1").SetCreatedByID(adminID).Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trip2, err := te.client.Trip.Create().
+		SetSlug("trip2").SetTitle("T2").SetCreatedByID(adminID).Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// s1: trip_id=trip1 (scope=trip)
+	s1, err := te.client.ShareLink.Create().
+		SetScope(sharelink.ScopeTrip).
+		SetTripID(trip1.ID).
+		SetCode("s1").
+		SetPasswordHash("x").
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// s2: scope=multi, trip_id=trip1, extra trip2 via ShareTrip
+	s2, err := te.client.ShareLink.Create().
+		SetScope(sharelink.ScopeMulti).
+		SetTripID(trip1.ID).
+		SetCode("s2").
+		SetPasswordHash("x").
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := te.client.ShareTrip.Create().
+		SetShareID(s2.ID).
+		SetTripID(trip2.ID).
+		Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	// v1: share=s1, ip=1.1.1.1
+	if _, err := te.client.Visit.Create().
+		SetShareID(s1.ID).SetSessionID("v1").SetIP("1.1.1.1").
+		SetVisitedAt(now.Add(-2 * time.Minute)).Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// v2: share=s1, ip=1.1.1.1 (duplicate)
+	if _, err := te.client.Visit.Create().
+		SetShareID(s1.ID).SetSessionID("v2").SetIP("1.1.1.1").
+		SetVisitedAt(now.Add(-1 * time.Minute)).Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// v3: share=s2, ip=2.2.2.2
+	v3, err := te.client.Visit.Create().
+		SetShareID(s2.ID).SetSessionID("v3").SetIP("2.2.2.2").
+		SetVisitedAt(now).Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := te.do("GET", "/api/admin/audit/trips", tok, nil, "")
+	var resp auditTripsResp
+	mustDecode(t, r, &resp)
+	r.Body.Close()
+	if len(resp.Trips) != 2 {
+		t.Fatalf("want 2 trips, got %d: %+v", len(resp.Trips), resp.Trips)
+	}
+
+	rowT1 := auditTripByID(resp.Trips, trip1.ID)
+	if rowT1 == nil {
+		t.Fatalf("trip1 missing")
+	}
+	if rowT1.Title != "T1" {
+		t.Fatalf("T1.title: want T1, got %q", rowT1.Title)
+	}
+	if rowT1.ShareCount != 2 {
+		t.Fatalf("T1.share_count: want 2, got %d", rowT1.ShareCount)
+	}
+	if rowT1.TotalVisits != 3 {
+		t.Fatalf("T1.total_visits: want 3, got %d", rowT1.TotalVisits)
+	}
+	if rowT1.UniqueVisitors != 2 {
+		t.Fatalf("T1.unique_visitors: want 2, got %d", rowT1.UniqueVisitors)
+	}
+	if rowT1.LastVisitAt == nil || !rowT1.LastVisitAt.Equal(v3.VisitedAt) {
+		t.Fatalf("T1.last_visit_at: want %v, got %v", v3.VisitedAt, rowT1.LastVisitAt)
+	}
+
+	rowT2 := auditTripByID(resp.Trips, trip2.ID)
+	if rowT2 == nil {
+		t.Fatalf("trip2 missing")
+	}
+	if rowT2.ShareCount != 1 {
+		t.Fatalf("T2.share_count: want 1, got %d", rowT2.ShareCount)
+	}
+	if rowT2.TotalVisits != 1 {
+		t.Fatalf("T2.total_visits: want 1, got %d", rowT2.TotalVisits)
+	}
+	if rowT2.UniqueVisitors != 1 {
+		t.Fatalf("T2.unique_visitors: want 1, got %d", rowT2.UniqueVisitors)
+	}
+	if rowT2.LastVisitAt == nil || !rowT2.LastVisitAt.Equal(v3.VisitedAt) {
+		t.Fatalf("T2.last_visit_at: want %v, got %v", v3.VisitedAt, rowT2.LastVisitAt)
+	}
+
+	// Sort: last_visit_at desc, ties by trip_id desc. Both have same last_visit_at (v3),
+	// so trip2 (higher id) should come first.
+	if resp.Trips[0].TripID != trip2.ID {
+		t.Fatalf("sort: want trip2 first (tie-break by trip_id desc), got trip_id=%d", resp.Trips[0].TripID)
+	}
+}
+
 func TestAuditEventsDeletedTrip(t *testing.T) {
 	te := newTestEnv(t)
 	adminID := te.seedUser(user.RoleAdmin, "admin", "pw")

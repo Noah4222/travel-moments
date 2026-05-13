@@ -467,8 +467,113 @@ func (h *Handler) AuditShares(c echo.Context) error {
 	return c.JSON(http.StatusOK, auditSharesResp{Shares: rows})
 }
 
+type auditTripRow struct {
+	TripID         int        `json:"trip_id"`
+	Title          string     `json:"title"`
+	ShareCount     int        `json:"share_count"`
+	TotalVisits    int        `json:"total_visits"`
+	UniqueVisitors int        `json:"unique_visitors"`
+	LastVisitAt    *time.Time `json:"last_visit_at"`
+}
+
+type auditTripsResp struct {
+	Trips []auditTripRow `json:"trips"`
+}
+
 func (h *Handler) AuditTrips(c echo.Context) error {
-	return echo.NewHTTPError(http.StatusNotImplemented, "not implemented")
+	ctx := c.Request().Context()
+
+	trips, err := h.DB.Trip.Query().All(ctx)
+	if err != nil {
+		return err
+	}
+
+	// trip_id -> set of share_ids attached (primary OR via share_trips).
+	tripShareIDs := make(map[int]map[int]struct{})
+	addAttach := func(tripID, shareID int) {
+		set, ok := tripShareIDs[tripID]
+		if !ok {
+			set = make(map[int]struct{})
+			tripShareIDs[tripID] = set
+		}
+		set[shareID] = struct{}{}
+	}
+
+	shares, err := h.DB.ShareLink.Query().All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, s := range shares {
+		addAttach(s.TripID, s.ID)
+	}
+	shareTrips, err := h.DB.ShareTrip.Query().All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, r := range shareTrips {
+		addAttach(r.TripID, r.ShareID)
+	}
+
+	// Group visits by share_id.
+	type visitInfo struct {
+		ip        string
+		visitedAt time.Time
+	}
+	visitsByShare := make(map[int][]visitInfo)
+	visits, err := h.DB.Visit.Query().All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, v := range visits {
+		visitsByShare[v.ShareID] = append(visitsByShare[v.ShareID], visitInfo{ip: v.IP, visitedAt: v.VisitedAt})
+	}
+
+	rows := make([]auditTripRow, 0, len(trips))
+	for _, t := range trips {
+		shareIDs := tripShareIDs[t.ID]
+		row := auditTripRow{
+			TripID:     t.ID,
+			Title:      t.Title,
+			ShareCount: len(shareIDs),
+		}
+		ipSet := make(map[string]struct{})
+		var lastVis *time.Time
+		for sid := range shareIDs {
+			for _, vi := range visitsByShare[sid] {
+				row.TotalVisits++
+				if vi.ip != "" {
+					ipSet[vi.ip] = struct{}{}
+				}
+				if lastVis == nil || vi.visitedAt.After(*lastVis) {
+					vt := vi.visitedAt
+					lastVis = &vt
+				}
+			}
+		}
+		row.UniqueVisitors = len(ipSet)
+		row.LastVisitAt = lastVis
+		rows = append(rows, row)
+	}
+
+	// Sort: last_visit_at desc, nulls last; tie-break by trip_id desc.
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i].LastVisitAt, rows[j].LastVisitAt
+		if a == nil && b == nil {
+			return rows[i].TripID > rows[j].TripID
+		}
+		if a == nil {
+			return false
+		}
+		if b == nil {
+			return true
+		}
+		if a.Equal(*b) {
+			return rows[i].TripID > rows[j].TripID
+		}
+		return a.After(*b)
+	})
+
+	return c.JSON(http.StatusOK, auditTripsResp{Trips: rows})
 }
 
 func (h *Handler) AuditTripDetail(c echo.Context) error {
