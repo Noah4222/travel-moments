@@ -465,7 +465,9 @@ async function uploadRawFile(
   return policy;
 }
 
-function postToOSS(
+// postToOSSOnce is one upload attempt. postToOSS wraps it with one retry so
+// transient mobile-network drops don't surface as a hard failure to the user.
+function postToOSSOnce(
   policy: UploadPolicy,
   file: File,
   onProgress: (p: number) => void,
@@ -485,16 +487,100 @@ function postToOSS(
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", policy.host, true);
+    // 5 minutes per file — enough for 50 MB on 3G, but not infinite.
+    xhr.timeout = 5 * 60 * 1000;
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`OSS ${xhr.status}: ${xhr.responseText.slice(0, 200)}`));
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      // OSS returns descriptive XML errors — surface a usable slice.
+      const body = (xhr.responseText || "").trim();
+      const msg = extractOSSError(body) || body.slice(0, 200);
+      const err = new Error(`OSS ${xhr.status}: ${msg}`) as Error & {
+        transient?: boolean;
+      };
+      // 408 / 429 / 5xx are retryable; 4xx is policy/auth and should stop.
+      err.transient =
+        xhr.status === 408 || xhr.status === 429 || xhr.status >= 500;
+      reject(err);
     };
-    xhr.onerror = () => reject(new Error("网络错误（OSS bucket 是否配了 CORS？）"));
+    xhr.onerror = () => {
+      const err = new Error(
+        diagnoseNetworkError(
+          "上传中断 — 检查网络（手机切换 Wi-Fi/蜂窝、锁屏会断连）",
+        ),
+      ) as Error & { transient?: boolean };
+      err.transient = true;
+      reject(err);
+    };
+    xhr.ontimeout = () => {
+      const err = new Error("上传超时（>5 分钟）— 网络太慢或卡住，请重试") as Error & {
+        transient?: boolean;
+      };
+      err.transient = true;
+      reject(err);
+    };
+    xhr.onabort = () => {
+      const err = new Error("上传被浏览器中止（切后台 / 关页面？）") as Error & {
+        transient?: boolean;
+      };
+      err.transient = true;
+      reject(err);
+    };
     xhr.send(fd);
   });
+}
+
+async function postToOSS(
+  policy: UploadPolicy,
+  file: File,
+  onProgress: (p: number) => void,
+): Promise<void> {
+  try {
+    await postToOSSOnce(policy, file, onProgress);
+  } catch (e) {
+    const isTransient = (e as { transient?: boolean }).transient === true;
+    if (!isTransient) throw e;
+    // One free retry with a short backoff. Reset progress so the bar
+    // restarts cleanly and the user sees the second attempt happening.
+    onProgress(0);
+    await sleep(800);
+    await postToOSSOnce(policy, file, onProgress);
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+// extractOSSError pulls the <Message> body out of an OSS XML error response so
+// the user sees `AccessDenied: Access denied by bucket policy.` instead of a
+// 200-char XML blob.
+function extractOSSError(body: string): string {
+  const code = /<Code>([^<]+)<\/Code>/.exec(body)?.[1];
+  const msg = /<Message>([^<]+)<\/Message>/.exec(body)?.[1];
+  if (code && msg) return `${code}: ${msg}`;
+  if (msg) return msg;
+  return "";
+}
+
+// diagnoseNetworkError augments xhr.onerror's empty event with whatever
+// context the browser exposes — connection type, online state — so it's not
+// just an opaque "network error".
+function diagnoseNetworkError(base: string): string {
+  const bits: string[] = [base];
+  if (typeof navigator !== "undefined") {
+    if (navigator.onLine === false) bits.push("当前离线");
+    const conn = (navigator as unknown as {
+      connection?: { effectiveType?: string; downlink?: number };
+    }).connection;
+    if (conn?.effectiveType) bits.push(`网络：${conn.effectiveType}`);
+  }
+  return bits.join(" · ");
 }
 
 async function readImageDimsSafe(file: File) {
