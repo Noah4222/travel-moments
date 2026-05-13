@@ -156,6 +156,37 @@ func (s *LocalStorage) DeleteObject(key string) error {
 	return nil
 }
 
+// ProcessAndSaveAs runs the local image processor against srcKey's bytes and
+// writes the result to destKey. Mirrors the Aliyun saveas semantics for dev.
+func (s *LocalStorage) ProcessAndSaveAs(srcKey, processSpec, destKey string) (int64, error) {
+	if processSpec == "" {
+		return 0, errors.New("empty process spec")
+	}
+	if _, err := sanitizeKey(srcKey); err != nil {
+		return 0, err
+	}
+	if _, err := sanitizeKey(destKey); err != nil {
+		return 0, err
+	}
+	raw, err := os.ReadFile(s.path(srcKey))
+	if err != nil {
+		return 0, err
+	}
+	mime := mimeFromKey(srcKey)
+	if s.processor == nil {
+		return 0, errors.New("local processor not configured")
+	}
+	out, _ := s.processor(raw, mime, processSpec)
+	if err := os.MkdirAll(filepath.Dir(s.path(destKey)), 0o755); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(s.path(destKey), out, 0o644); err != nil {
+		return 0, err
+	}
+	return int64(len(out)), nil
+}
+
+
 // ---- mock HTTP routes ----
 
 // RegisterRoutes mounts the mock OSS endpoints under the given group. Pass the

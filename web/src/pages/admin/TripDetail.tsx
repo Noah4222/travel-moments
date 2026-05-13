@@ -396,6 +396,11 @@ export function TripDetailPage() {
                 await api.deleteAsset(a.id);
                 setAssets((cur) => cur.filter((x) => x.id !== a.id));
               }}
+              onAssetChanged={(saved) => {
+                setAssets((cur) =>
+                  cur.map((x) => (x.id === saved.id ? saved : x)),
+                );
+              }}
               onBulkDelete={async (ids) => {
                 const limit = 4;
                 let next = 0;

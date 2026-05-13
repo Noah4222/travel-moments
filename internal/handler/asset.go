@@ -232,6 +232,123 @@ func (h *Handler) fetchImageInfo(key string) (map[string]any, error) {
 	return out, nil
 }
 
+// ---- Edit asset (admin) ----
+
+type editAssetReq struct {
+	Ops     []oss.EditOp `json:"ops"`
+	Replace bool         `json:"replace"`
+}
+
+// EditAsset runs an OSS image-process chain against the asset and either
+// overwrites it (replace=true: same row, new key, old object deleted) or
+// stores the result as a new asset in the same trip. Admin only.
+//
+//	POST /api/assets/:id/edit
+func (h *Handler) EditAsset(c echo.Context) error {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "bad id")
+	}
+	a, err := h.DB.Asset.Get(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "asset not found")
+	}
+	if a.Kind != asset.KindPhoto {
+		return echo.NewHTTPError(http.StatusBadRequest, "only photos are editable")
+	}
+	if h.OSS == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "OSS not configured")
+	}
+	var req editAssetReq
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "bad body")
+	}
+	if len(req.Ops) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "no edits supplied")
+	}
+	spec, err := oss.BuildEditProcess(req.Ops)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	// Always write the edited bytes as JPEG so we never have to worry about
+	// HEIC/RAW round-tripping. Keep the OSS key under the trip prefix so the
+	// existing trip-write checks still pass on subsequent operations.
+	ext := ".jpg"
+	newKey := fmt.Sprintf("trips/%d/edited/%s%s", a.TripID, uuid.NewString(), ext)
+	specWithFormat := spec + "/format,jpg"
+
+	size, err := h.OSS.ProcessAndSaveAs(a.OssKey, specWithFormat, newKey)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("OSS process failed: %v", err))
+	}
+
+	newW, newH := computeEditedDims(a.Width, a.Height, req.Ops)
+
+	ctx := c.Request().Context()
+	if req.Replace {
+		oldKey := a.OssKey
+		u, err := h.DB.Asset.UpdateOneID(a.ID).
+			SetOssKey(newKey).
+			SetMime("image/jpeg").
+			SetSize(size).
+			SetWidth(newW).
+			SetHeight(newH).
+			ClearExif().
+			Save(ctx)
+		if err != nil {
+			return err
+		}
+		go func(k string) { _ = h.OSS.DeleteObject(k) }(oldKey)
+		if h.SignedURLs != nil {
+			h.SignedURLs.Invalidate(strconv.Itoa(a.ID))
+		}
+		return c.JSON(http.StatusOK, h.toAssetDTO(u))
+	}
+
+	cl := auth.MustClaims(c)
+	created, err := h.DB.Asset.Create().
+		SetTripID(a.TripID).
+		SetKind(asset.KindPhoto).
+		SetOssKey(newKey).
+		SetMime("image/jpeg").
+		SetSize(size).
+		SetWidth(newW).
+		SetHeight(newH).
+		SetUploadedByID(cl.UserID).
+		Save(ctx)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusCreated, h.toAssetDTO(created))
+}
+
+// computeEditedDims walks the op list and returns the resulting pixel
+// dimensions. Order matches BuildEditProcess: rotate is applied to the source
+// dims first (auto-orient is a no-op for dim accounting), crop replaces them.
+func computeEditedDims(w, h int, ops []oss.EditOp) (int, int) {
+	for _, op := range ops {
+		switch op.Kind {
+		case "rotate":
+			d := op.Deg % 360
+			if d < 0 {
+				d += 360
+			}
+			if d == 90 || d == 270 {
+				w, h = h, w
+			}
+		case "crop":
+			if op.W > 0 {
+				w = op.W
+			}
+			if op.H > 0 {
+				h = op.H
+			}
+		}
+	}
+	return w, h
+}
+
 // ---- List assets in a trip ----
 
 // assetPage is the cursor-paginated response envelope. cursor = the id of the

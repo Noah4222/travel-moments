@@ -79,3 +79,32 @@ func (s *AliyunStorage) HeadObject(key string) (bool, int64, error) {
 func (s *AliyunStorage) DeleteObject(key string) error {
 	return s.bucket.DeleteObject(key)
 }
+
+// ProcessAndSaveAs uses OSS image-process with the `sys/saveas` suffix so the
+// processed bytes are written directly back into the bucket — no round-trip
+// through this server. The process spec must NOT include the leading
+// `image/` prefix consumer code might prepend elsewhere; pass it exactly as
+// the caller wants it, e.g. `image/rotate,90/crop,x_0,y_0,w_500,h_500`.
+func (s *AliyunStorage) ProcessAndSaveAs(srcKey, processSpec, destKey string) (int64, error) {
+	if processSpec == "" {
+		return 0, fmt.Errorf("empty process spec")
+	}
+	if _, err := sanitizeKey(srcKey); err != nil {
+		return 0, err
+	}
+	if _, err := sanitizeKey(destKey); err != nil {
+		return 0, err
+	}
+	// `sys/saveas` takes URL-safe base64 (no padding) of the key + bucket.
+	encKey := base64.RawURLEncoding.EncodeToString([]byte(destKey))
+	encBucket := base64.RawURLEncoding.EncodeToString([]byte(s.cfg.Bucket))
+	processor := fmt.Sprintf("%s|sys/saveas,o_%s,b_%s", processSpec, encKey, encBucket)
+	if _, err := s.bucket.ProcessObject(srcKey, processor); err != nil {
+		return 0, err
+	}
+	_, size, err := s.HeadObject(destKey)
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
+}

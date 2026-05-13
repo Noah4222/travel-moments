@@ -141,6 +141,7 @@ func New(cfg *config.Config, client *ent.Client, logger *slog.Logger) *echo.Echo
 
 	// Assets: delete is admin-only
 	api.DELETE("/assets/:id", h.DeleteAsset, auth.RequireRole(auth.RoleAdmin))
+	api.POST("/assets/:id/edit", h.EditAsset, auth.RequireRole(auth.RoleAdmin))
 	api.GET("/assets/:id/exif", h.AdminAssetEXIF, auth.RequireUser)
 
 	// Collections (admin/editor)

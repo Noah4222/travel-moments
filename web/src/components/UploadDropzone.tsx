@@ -51,7 +51,6 @@ type Task = {
   status: "pending" | "uploading" | "registering" | "done" | "error";
   error?: string;
   livePhoto: boolean;
-  thumbURL?: string;        // blob: URL for preview (revoked on unmount)
   isVideo: boolean;
   group: Group;             // original file refs, kept for retry
 };
@@ -105,23 +104,15 @@ function groupFiles(files: File[]): Group[] {
 }
 
 function makeTask(g: Group): Task {
-  const main = g.photo ?? g.video!;
   const isVideo = !!g.video;
   const label = (g.photo?.name ?? g.video?.name ?? "") +
     (g.motion ? " ⚡ (Live Photo)" : "");
-  let thumbURL: string | undefined;
-  // Photo: blob URL works directly. Video: blob URL on <video> with
-  // preload=metadata also works as poster.
-  if (main && (main.type.startsWith("image/") || main.type.startsWith("video/"))) {
-    thumbURL = URL.createObjectURL(main);
-  }
   return {
     id: uuid(),
     label,
     progress: 0,
     status: "pending",
     livePhoto: !!(g.photo && g.motion),
-    thumbURL,
     isVideo,
     group: g,
   };
@@ -151,15 +142,6 @@ export function UploadDropzone({
     }).catch(() => {
       /* fall back to default 5 */
     });
-  }, []);
-
-  // Revoke blob URLs on unmount.
-  useEffect(() => {
-    return () => {
-      for (const t of tasksRef.current) {
-        if (t.thumbURL) URL.revokeObjectURL(t.thumbURL);
-      }
-    };
   }, []);
 
   const updateTask = useCallback((id: string, patch: Partial<Task>) => {
@@ -211,12 +193,7 @@ export function UploadDropzone({
   }, [concurrency, runTask, updateTask]);
 
   const clearDone = useCallback(() => {
-    setTasks((cur) => {
-      for (const t of cur) {
-        if (t.status === "done" && t.thumbURL) URL.revokeObjectURL(t.thumbURL);
-      }
-      return cur.filter((t) => t.status !== "done");
-    });
+    setTasks((cur) => cur.filter((t) => t.status !== "done"));
   }, []);
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -292,7 +269,7 @@ export function UploadDropzone({
             </div>
           </div>
 
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {tasks.map((t) => (
               <UploadRow key={t.id} task={t} onRetry={() => retryOne(t.id)} />
             ))}
@@ -310,32 +287,42 @@ function UploadRow({ task, onRetry }: { task: Task; onRetry: () => void }) {
       : task.status === "done"
         ? "bg-emerald-500"
         : "bg-zinc-700 dark:bg-zinc-300";
+  // No thumbnails: a 100-item list with <img>/<video> blob: URLs trashes mobile
+  // scroll. Show file kind + name + a thin progress bar instead.
   return (
     <li
       className={cn(
-        "flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-2 text-sm dark:border-zinc-800 dark:bg-zinc-950",
+        "flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm [content-visibility:auto] [contain-intrinsic-size:48px] dark:border-zinc-800 dark:bg-zinc-950",
         task.status === "error" && "border-rose-300 dark:border-rose-900",
         task.status === "done" && "border-emerald-300 dark:border-emerald-900/50",
       )}
     >
-      <Thumbnail task={task} />
-      <div className="min-w-0 flex-1 space-y-1">
+      <span
+        aria-hidden
+        className="shrink-0 text-base leading-none"
+        title={task.isVideo ? "视频" : task.livePhoto ? "Live Photo" : "图片"}
+      >
+        {task.isVideo ? "🎬" : task.livePhoto ? "⚡" : "📷"}
+      </span>
+      <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm" title={task.label}>
+          <span className="min-w-0 flex-1 truncate" title={task.label}>
             {task.label}
           </span>
           <span className="shrink-0 text-xs text-zinc-500">
             {statusLabel(task)}
           </span>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-          <div
-            className={cn("h-full transition-all", tone)}
-            style={{ width: `${Math.round(task.progress * 100)}%` }}
-          />
-        </div>
+        {task.status !== "done" && (
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+            <div
+              className={cn("h-full transition-[width]", tone)}
+              style={{ width: `${Math.round(task.progress * 100)}%` }}
+            />
+          </div>
+        )}
         {task.status === "error" && task.error && (
-          <p className="break-words text-xs text-rose-600" title={task.error}>
+          <p className="mt-1 break-words text-xs text-rose-600" title={task.error}>
             {task.error.slice(0, 200)}
           </p>
         )}
@@ -344,54 +331,12 @@ function UploadRow({ task, onRetry }: { task: Task; onRetry: () => void }) {
         <button
           type="button"
           onClick={onRetry}
-          className="shrink-0 rounded-md border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40"
+          className="shrink-0 rounded-md border border-rose-300 px-2 py-0.5 text-xs text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40"
         >
           重试
         </button>
       )}
     </li>
-  );
-}
-
-function Thumbnail({ task }: { task: Task }) {
-  const size = "h-12 w-12";
-  if (!task.thumbURL) {
-    return (
-      <div
-        className={cn(
-          size,
-          "flex shrink-0 items-center justify-center rounded-md bg-zinc-100 text-xs text-zinc-400 dark:bg-zinc-800",
-        )}
-      >
-        {task.isVideo ? "🎬" : "📄"}
-      </div>
-    );
-  }
-  if (task.isVideo) {
-    return (
-      <div className={cn(size, "relative shrink-0 overflow-hidden rounded-md bg-black")}>
-        <video
-          src={task.thumbURL}
-          muted
-          playsInline
-          preload="metadata"
-          className="h-full w-full object-cover"
-        />
-        <span className="absolute bottom-0 right-0 rounded-tl bg-black/60 px-1 text-[10px] text-white">
-          ▶
-        </span>
-      </div>
-    );
-  }
-  return (
-    <img
-      src={task.thumbURL}
-      alt=""
-      className={cn(
-        size,
-        "shrink-0 rounded-md object-cover ring-1 ring-zinc-200 dark:ring-zinc-800",
-      )}
-    />
   );
 }
 

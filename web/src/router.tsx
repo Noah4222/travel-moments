@@ -11,6 +11,7 @@ import { SinglePhotoPage } from "@/pages/public/SinglePhoto";
 import { UploadPage } from "@/pages/public/Upload";
 import { SettingsPage } from "@/pages/admin/Settings";
 import { TripPreviewPage } from "@/pages/admin/TripPreview";
+import { SplashPage } from "@/pages/Splash";
 
 function RequireAuth({
   children,
@@ -37,6 +38,7 @@ export function AppRoutes() {
   return (
     <Routes>
       {/* Public shared-album routes (no admin layout) */}
+      <Route path="/" element={<SplashPage />} />
       <Route path="/s/:code" element={<SharePasswordPage />} />
       <Route path="/s/:code/view" element={<SharedTripPage />} />
       <Route path="/a/:code" element={<SinglePhotoPage />} />
@@ -44,10 +46,6 @@ export function AppRoutes() {
 
       <Route element={<AppLayout />}>
         <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/"
-          element={<Navigate to="/admin" replace />}
-        />
         <Route
           path="/admin"
           element={

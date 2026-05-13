@@ -31,6 +31,11 @@ type Storage interface {
 	// HeadObject returns whether the object exists and its size.
 	HeadObject(key string) (exists bool, size int64, err error)
 
+	// ProcessAndSaveAs runs the OSS image-process spec against srcKey and
+	// writes the result to destKey (same bucket). Returns the size of the
+	// resulting object so callers can update their DTOs.
+	ProcessAndSaveAs(srcKey, processSpec, destKey string) (size int64, err error)
+
 	// Backend label, useful for /health and logging.
 	Backend() string
 }

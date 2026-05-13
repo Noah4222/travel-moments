@@ -5,6 +5,7 @@ import { PicturePreview } from "./PicturePreview";
 import { cn } from "@/lib/cn";
 import { copyText, composeAssetShareCopy } from "@/lib/clipboard";
 import { Spinner } from "./Spinner";
+import { PhotoEditor } from "./PhotoEditor";
 
 export function AssetGrid({
   assets,
@@ -14,6 +15,7 @@ export function AssetGrid({
   onBulkDelete,
   onClick,
   onCoverChange,
+  onAssetChanged,
   hasMore,
   loadingMore,
   onLoadMore,
@@ -30,6 +32,8 @@ export function AssetGrid({
   onBulkDelete?: (ids: number[]) => Promise<void>;
   onClick?: (a: Asset) => void;
   onCoverChange?: () => void | Promise<void>;
+  /** Replace a single asset in-place (e.g. after admin photo edit). */
+  onAssetChanged?: (a: Asset) => void;
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
@@ -37,6 +41,7 @@ export function AssetGrid({
   fetchAllIDs?: () => Promise<number[]>;
 }) {
   const [shareInfo, setShareInfo] = useState<{ url: string } | null>(null);
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState<{ done: number; total: number } | null>(null);
@@ -206,6 +211,7 @@ export function AssetGrid({
             onDelete={onDelete}
             onShared={(url) => setShareInfo({ url })}
             onCoverChange={onCoverChange}
+            onEdit={() => setEditingAsset(a)}
           />
         ))}
       </ul>
@@ -231,6 +237,16 @@ export function AssetGrid({
       {shareInfo && (
         <SingleShareDialog url={shareInfo.url} onClose={() => setShareInfo(null)} />
       )}
+      {editingAsset && (
+        <PhotoEditor
+          asset={editingAsset}
+          onClose={() => setEditingAsset(null)}
+          onSaved={(saved) => {
+            setEditingAsset(null);
+            onAssetChanged?.(saved);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -246,6 +262,7 @@ function AssetTile({
   onDelete,
   onShared,
   onCoverChange,
+  onEdit,
 }: {
   asset: Asset;
   isAdmin: boolean;
@@ -257,6 +274,7 @@ function AssetTile({
   onDelete?: (a: Asset) => void | Promise<void>;
   onShared?: (url: string) => void;
   onCoverChange?: () => void | Promise<void>;
+  onEdit?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const live = asset.is_live_photo && asset.urls.motion;
@@ -382,6 +400,18 @@ function AssetTile({
           >
             {sharing ? "…" : "分享"}
           </button>
+          {asset.kind === "photo" && onEdit && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+              className="rounded-md bg-black/60 px-2 py-0.5 text-xs text-white hover:bg-black/80"
+            >
+              ✎ 编辑
+            </button>
+          )}
           {onDelete && (
             <button
               type="button"
