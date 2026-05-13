@@ -1,6 +1,4 @@
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
-import { useAuth } from "@/lib/auth";
 
 /**
  * Public landing page at "/". Tiles a random subset of curated Unsplash
@@ -43,7 +41,6 @@ function unsplashURL(id: string, w: number) {
 }
 
 export function SplashPage() {
-  const { user, loading } = useAuth();
   const photos = useMemo(() => shuffled(PHOTO_IDS, 12), []);
 
   return (
@@ -74,26 +71,7 @@ export function SplashPage() {
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             把每一段旅行的照片和视频留下来，跟好朋友们一起重温。
           </p>
-          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            {loading ? (
-              <span className="text-sm text-zinc-500">…</span>
-            ) : user ? (
-              <Link
-                to="/admin"
-                className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
-              >
-                进入后台 →
-              </Link>
-            ) : (
-              <Link
-                to="/login"
-                className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
-              >
-                登录后台
-              </Link>
-            )}
-          </div>
-          <p className="mt-4 text-[11px] text-zinc-400">
+          <p className="mt-6 text-[11px] text-zinc-400">
             背景图来自 Unsplash
           </p>
         </div>
