@@ -34,8 +34,9 @@ type auditEvent struct {
 }
 
 type auditEventsResp struct {
-	Events     []auditEvent `json:"events"`
-	NextBefore *time.Time   `json:"next_before"`
+	Events       []auditEvent `json:"events"`
+	NextBefore   *time.Time   `json:"next_before"`
+	NextBeforeID *int         `json:"next_before_id"`
 }
 
 func (h *Handler) AuditEvents(c echo.Context) error {
@@ -54,7 +55,9 @@ func (h *Handler) AuditEvents(c echo.Context) error {
 		limit = n
 	}
 
-	// before cursor
+	// before cursor — compound (visited_at, id). before_id is optional; when
+	// absent we use a simple visited_at < t predicate (open boundary, used by
+	// callers that haven't received a before_id yet).
 	var beforeT *time.Time
 	if s := c.QueryParam("before"); s != "" {
 		t, err := time.Parse(time.RFC3339Nano, s)
@@ -66,6 +69,14 @@ func (h *Handler) AuditEvents(c echo.Context) error {
 			}
 		}
 		beforeT = &t
+	}
+	var beforeID *int
+	if s := c.QueryParam("before_id"); s != "" {
+		id, err := strconv.Atoi(s)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "bad before_id")
+		}
+		beforeID = &id
 	}
 
 	// Build the visit query with filters.
@@ -96,7 +107,16 @@ func (h *Handler) AuditEvents(c echo.Context) error {
 		q = q.Where(visit.ShareIDIn(shareIDs...))
 	}
 	if beforeT != nil {
-		q = q.Where(visit.VisitedAtLT(*beforeT))
+		if beforeID != nil {
+			// Compound cursor: (visited_at, id) < (beforeT, beforeID) lexicographically.
+			q = q.Where(visit.Or(
+				visit.VisitedAtLT(*beforeT),
+				visit.And(visit.VisitedAtEQ(*beforeT), visit.IDLT(*beforeID)),
+			))
+		} else {
+			// Open boundary — caller didn't supply before_id yet.
+			q = q.Where(visit.VisitedAtLT(*beforeT))
+		}
 	}
 
 	visits, err := q.
@@ -217,8 +237,11 @@ func (h *Handler) AuditEvents(c echo.Context) error {
 	}
 
 	if hasMore {
-		last := out.Events[len(out.Events)-1].VisitedAt
-		out.NextBefore = &last
+		lastEvent := out.Events[len(out.Events)-1]
+		lastT := lastEvent.VisitedAt
+		lastID := lastEvent.VisitID
+		out.NextBefore = &lastT
+		out.NextBeforeID = &lastID
 	}
 
 	return c.JSON(http.StatusOK, out)

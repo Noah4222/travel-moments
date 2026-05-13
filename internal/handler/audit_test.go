@@ -61,8 +61,9 @@ type auditEvent struct {
 }
 
 type auditEventsResp struct {
-	Events     []auditEvent `json:"events"`
-	NextBefore *time.Time   `json:"next_before"`
+	Events       []auditEvent `json:"events"`
+	NextBefore   *time.Time   `json:"next_before"`
+	NextBeforeID *int         `json:"next_before_id"`
 }
 
 func TestAuditEventsPagination(t *testing.T) {
@@ -89,13 +90,21 @@ func TestAuditEventsPagination(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	base := time.Now().UTC().Add(-time.Hour)
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	// Seed 60 visits. 3 of them share the same visited_at to exercise the
+	// compound-cursor tie-break: if pagination only filters on visited_at < t,
+	// these tied rows get silently dropped between pages.
+	tieTime := base.Add(25 * time.Second)
 	for i := 0; i < 60; i++ {
+		visitedAt := base.Add(time.Duration(i) * time.Second)
+		if i == 25 || i == 26 || i == 27 {
+			visitedAt = tieTime
+		}
 		_, err := te.client.Visit.Create().
 			SetShareID(share.ID).
 			SetSessionID(fmt.Sprintf("sess-%d", i)).
 			SetIP("9.9.9.9").
-			SetVisitedAt(base.Add(time.Duration(i) * time.Second)).
+			SetVisitedAt(visitedAt).
 			Save(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -112,6 +121,9 @@ func TestAuditEventsPagination(t *testing.T) {
 	if page1.NextBefore == nil {
 		t.Fatalf("page1: want next_before, got nil")
 	}
+	if page1.NextBeforeID == nil {
+		t.Fatalf("page1: want next_before_id, got nil")
+	}
 	// Visits should be newest-first.
 	for i := 1; i < len(page1.Events); i++ {
 		if page1.Events[i-1].VisitedAt.Before(page1.Events[i].VisitedAt) {
@@ -119,8 +131,14 @@ func TestAuditEventsPagination(t *testing.T) {
 		}
 	}
 
+	seen := make(map[int]struct{}, 60)
+	for _, e := range page1.Events {
+		seen[e.VisitID] = struct{}{}
+	}
+
 	cursor := page1.NextBefore.Format(time.RFC3339Nano)
-	r2 := te.do("GET", "/api/admin/audit/events?before="+cursor, tok, nil, "")
+	url := fmt.Sprintf("/api/admin/audit/events?before=%s&before_id=%d", cursor, *page1.NextBeforeID)
+	r2 := te.do("GET", url, tok, nil, "")
 	var page2 auditEventsResp
 	mustDecode(t, r2, &page2)
 	r2.Body.Close()
@@ -129,6 +147,15 @@ func TestAuditEventsPagination(t *testing.T) {
 	}
 	if page2.NextBefore != nil {
 		t.Fatalf("page2: want nil next_before, got %v", page2.NextBefore)
+	}
+	if page2.NextBeforeID != nil {
+		t.Fatalf("page2: want nil next_before_id, got %v", page2.NextBeforeID)
+	}
+	for _, e := range page2.Events {
+		seen[e.VisitID] = struct{}{}
+	}
+	if len(seen) != 60 {
+		t.Fatalf("expected 60 distinct visit IDs across both pages, got %d", len(seen))
 	}
 }
 
