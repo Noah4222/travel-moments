@@ -70,3 +70,17 @@ func TestAliyunSignUploadPolicy(t *testing.T) {
 		t.Fatalf("policy missing key/size constraints: %+v", doc.Conditions)
 	}
 }
+
+func TestUploadHostNormalizesEndpoint(t *testing.T) {
+	cases := map[string]string{
+		"oss-cn-shanghai.aliyuncs.com":         "https://b.oss-cn-shanghai.aliyuncs.com",
+		"https://oss-cn-shanghai.aliyuncs.com": "https://b.oss-cn-shanghai.aliyuncs.com",
+		"http://oss-cn-shanghai.aliyuncs.com":  "http://b.oss-cn-shanghai.aliyuncs.com",
+		"https://oss-cn-shanghai.aliyuncs.com/": "https://b.oss-cn-shanghai.aliyuncs.com",
+	}
+	for in, want := range cases {
+		if got := uploadHost("b", in); got != want {
+			t.Errorf("uploadHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

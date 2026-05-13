@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -51,7 +52,7 @@ func (s *AliyunStorage) SignUploadPolicy(key string, maxSize int64, ttl time.Dur
 	sig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
 	return &UploadPolicy{
-		Host:          fmt.Sprintf("https://%s.%s", s.cfg.Bucket, s.cfg.Endpoint),
+		Host:          uploadHost(s.cfg.Bucket, s.cfg.Endpoint),
 		AccessKeyID:   s.cfg.AccessKeyID,
 		Policy:        policyB64,
 		Signature:     sig,
@@ -60,6 +61,22 @@ func (s *AliyunStorage) SignUploadPolicy(key string, maxSize int64, ttl time.Dur
 		MaxSize:       maxSize,
 		SuccessStatus: "200",
 	}, nil
+}
+
+// uploadHost composes the virtual-hosted bucket URL. Endpoint may be a bare
+// host ("oss-cn-shanghai.aliyuncs.com") or already include a scheme; preserve
+// the scheme if given, default to https otherwise. Without this, configuring
+// OSS_ENDPOINT=https://... produced malformed URLs like
+// "https://bucket.https://oss-cn-shanghai.aliyuncs.com".
+func uploadHost(bucket, endpoint string) string {
+	scheme := "https"
+	host := endpoint
+	if i := strings.Index(endpoint, "://"); i >= 0 {
+		scheme = endpoint[:i]
+		host = endpoint[i+3:]
+	}
+	host = strings.TrimRight(host, "/")
+	return fmt.Sprintf("%s://%s.%s", scheme, bucket, host)
 }
 
 func (s *AliyunStorage) HeadObject(key string) (bool, int64, error) {
