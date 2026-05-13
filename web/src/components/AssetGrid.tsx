@@ -197,7 +197,7 @@ export function AssetGrid({
         </div>
       )}
 
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-8">
         {assets.map((a) => (
           <AssetTile
             key={a.id}
@@ -357,11 +357,11 @@ function AssetTile({
         {isCover && <Badge tone="success">★ 封面</Badge>}
       </div>
       {isAdmin && !selectMode && (
-        <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
+        <div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-full bg-black/55 p-0.5 text-white opacity-0 ring-1 ring-white/15 backdrop-blur-md transition group-hover:opacity-100">
           {asset.kind === "photo" && !isCover && (
-            <button
-              type="button"
-              disabled={coverBusy}
+            <TileActionButton
+              label="设为封面"
+              busy={coverBusy}
               onClick={async (e) => {
                 e.stopPropagation();
                 setCoverBusy(true);
@@ -374,14 +374,13 @@ function AssetTile({
                   setCoverBusy(false);
                 }
               }}
-              className="rounded-md bg-black/60 px-2 py-0.5 text-xs text-white hover:bg-black/80 disabled:opacity-60"
             >
-              {coverBusy ? "…" : "设为封面"}
-            </button>
+              <StarIcon />
+            </TileActionButton>
           )}
-          <button
-            type="button"
-            disabled={sharing}
+          <TileActionButton
+            label="分享"
+            busy={sharing}
             onClick={async (e) => {
               e.stopPropagation();
               setSharing(true);
@@ -396,26 +395,25 @@ function AssetTile({
                 setSharing(false);
               }
             }}
-            className="rounded-md bg-black/60 px-2 py-0.5 text-xs text-white hover:bg-black/80 disabled:opacity-60"
           >
-            {sharing ? "…" : "分享"}
-          </button>
+            <ShareIcon />
+          </TileActionButton>
           {asset.kind === "photo" && onEdit && (
-            <button
-              type="button"
+            <TileActionButton
+              label="编辑"
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit();
               }}
-              className="rounded-md bg-black/60 px-2 py-0.5 text-xs text-white hover:bg-black/80"
             >
-              ✎ 编辑
-            </button>
+              <PencilIcon />
+            </TileActionButton>
           )}
           {onDelete && (
-            <button
-              type="button"
-              disabled={deleting}
+            <TileActionButton
+              label="删除"
+              busy={deleting}
+              tone="danger"
               onClick={async (e) => {
                 e.stopPropagation();
                 if (!window.confirm("删除该资源？")) return;
@@ -426,14 +424,87 @@ function AssetTile({
                   setDeleting(false);
                 }
               }}
-              className="rounded-md bg-rose-600/80 px-2 py-0.5 text-xs text-white hover:bg-rose-600 disabled:opacity-60"
             >
-              {deleting ? "…" : "删除"}
-            </button>
+              <TrashIcon />
+            </TileActionButton>
           )}
         </div>
       )}
     </li>
+  );
+}
+
+function TileActionButton({
+  label,
+  busy,
+  tone,
+  onClick,
+  children,
+}: {
+  label: string;
+  busy?: boolean;
+  tone?: "danger";
+  onClick: (e: React.MouseEvent) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={busy}
+      onClick={onClick}
+      className={cn(
+        "flex h-7 w-7 items-center justify-center rounded-full transition",
+        tone === "danger"
+          ? "hover:bg-rose-500/80 active:bg-rose-500"
+          : "hover:bg-white/20 active:bg-white/30",
+        busy && "cursor-not-allowed opacity-60",
+      )}
+    >
+      {busy ? <Spinner className="h-3.5 w-3.5 text-white" /> : children}
+    </button>
+  );
+}
+
+function StarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1L3.2 9.4l6.1-.9L12 3Z" />
+    </svg>
+  );
+}
+
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <path d="m8.6 13.5 6.8 4" />
+      <path d="m15.4 6.5-6.8 4" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 20h4l10-10-4-4L4 16v4Z" />
+      <path d="m14 6 4 4" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 7h16" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M6 7h12l-1 13H7L6 7Z" />
+      <path d="M9 7V4h6v3" />
+    </svg>
   );
 }
 
