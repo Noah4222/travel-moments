@@ -159,7 +159,7 @@ export function SharedTripPage() {
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <header className="border-b border-zinc-200 bg-white/70 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/70">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-3">
           <div className="min-w-0">
             {isMulti && tripScope && (
               <button
@@ -192,13 +192,13 @@ export function SharedTripPage() {
           </div>
         </div>
         {scope.share_note && !tripScope && (
-          <p className="mx-auto max-w-5xl px-4 pb-3 text-sm text-zinc-500">
+          <p className="mx-auto max-w-[1600px] px-4 pb-3 text-sm text-zinc-500">
             📝 {scope.share_note}
           </p>
         )}
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-6 px-4 py-6">
+      <main className="mx-auto max-w-[1600px] space-y-6 px-4 py-6">
         {isMulti && !tripScope ? (
           <TripListView trips={scope.trips ?? []} onOpen={openTrip} />
         ) : tripLoading ? (
@@ -207,7 +207,7 @@ export function SharedTripPage() {
           </div>
         ) : viewing?.assets && viewing.assets.length > 0 ? (
           <>
-            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-8">
               {viewing.assets.map((a, i) => (
                 <PublicTile key={a.id} asset={a} onClick={() => openAt(i)} />
               ))}
@@ -305,7 +305,7 @@ function TripListView({
             </h2>
             <span className="text-xs text-zinc-500">{g.trips.length} 个相册</span>
           </div>
-          <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {g.trips.map((t) => (
               <li key={t.id}>
                 <button

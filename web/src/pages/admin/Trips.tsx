@@ -106,7 +106,7 @@ function TripsTimeline({ trips }: { trips: Trip[] }) {
             <span className="text-xs text-zinc-500">{g.trips.length} 个相册</span>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {g.trips.map((t) => (
               <Link
                 key={t.id}

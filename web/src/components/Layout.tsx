@@ -15,7 +15,7 @@ export function AppLayout() {
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3 sm:px-4">
+        <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between gap-2 px-3 sm:px-4">
           <Link to="/" className="truncate text-base font-semibold tracking-tight sm:text-lg">
             Travel Moments
           </Link>
@@ -127,7 +127,7 @@ export function AppLayout() {
         )}
       </header>
 
-      <main className="mx-auto max-w-6xl px-3 py-5 sm:px-4 sm:py-8">
+      <main className="mx-auto max-w-[1600px] px-3 py-5 sm:px-4 sm:py-8">
         <Outlet />
       </main>
     </div>
