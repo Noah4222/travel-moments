@@ -643,6 +643,161 @@ func TestAuditTripsAggregation(t *testing.T) {
 	}
 }
 
+// ---- Task 5: AuditTripDetail tests ----
+
+type auditDaily struct {
+	Date      string `json:"date"`
+	Visits    int    `json:"visits"`
+	UniqueIPs int    `json:"unique_ips"`
+}
+type auditTopAsset struct {
+	AssetID  int            `json:"asset_id"`
+	Views    int            `json:"views"`
+	ThumbURL map[string]any `json:"thumb_url"`
+}
+type auditRefererRow struct {
+	Host  string `json:"host"`
+	Count int    `json:"count"`
+}
+type auditCountryRow struct {
+	Code  string `json:"code"`
+	Count int    `json:"count"`
+}
+type auditTripDetailResp struct {
+	Trip      map[string]any    `json:"trip"`
+	Shares    []auditShareRow   `json:"shares"`
+	Daily     []auditDaily      `json:"daily"`
+	TopAssets []auditTopAsset   `json:"top_assets"`
+	Referers  []auditRefererRow `json:"referers"`
+	Countries []auditCountryRow `json:"countries"`
+}
+
+func TestAuditTripDetailDailyBackfillAndReferer(t *testing.T) {
+	te := newTestEnv(t)
+	adminID := te.seedUser(user.RoleAdmin, "admin", "pw")
+	tok := te.login("admin", "pw")
+	ctx := t.Context()
+
+	tr, err := te.client.Trip.Create().
+		SetSlug("E").SetTitle("E").SetCreatedByID(adminID).Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	share, err := te.client.ShareLink.Create().
+		SetScope(sharelink.ScopeTrip).
+		SetTripID(tr.ID).
+		SetCode("Eshare").
+		SetPasswordHash("x").
+		Save(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	loc := now.Location()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+
+	// D-30 visit
+	if _, err := te.client.Visit.Create().
+		SetShareID(share.ID).SetSessionID("d30").SetIP("1.1.1.1").
+		SetReferer("https://t.me/foo").
+		SetVisitedAt(dayStart.AddDate(0, 0, -30).Add(2 * time.Hour)).
+		Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// D-1 visit #1
+	if _, err := te.client.Visit.Create().
+		SetShareID(share.ID).SetSessionID("d1a").SetIP("2.2.2.2").
+		SetReferer("https://t.me/bar").
+		SetVisitedAt(dayStart.AddDate(0, 0, -1).Add(2 * time.Hour)).
+		Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// D-1 visit #2 (empty referer)
+	if _, err := te.client.Visit.Create().
+		SetShareID(share.ID).SetSessionID("d1b").SetIP("3.3.3.3").
+		SetVisitedAt(dayStart.AddDate(0, 0, -1).Add(3 * time.Hour)).
+		Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	r := te.do("GET", fmt.Sprintf("/api/admin/audit/trips/%d", tr.ID), tok, nil, "")
+	var resp auditTripDetailResp
+	mustDecode(t, r, &resp)
+	r.Body.Close()
+
+	if len(resp.Daily) != 90 {
+		t.Fatalf("daily len: want 90, got %d", len(resp.Daily))
+	}
+	if resp.Daily[88].Visits != 2 {
+		t.Fatalf("daily[88] (D-1).visits: want 2, got %d", resp.Daily[88].Visits)
+	}
+	if resp.Daily[59].Visits != 1 {
+		t.Fatalf("daily[59] (D-30).visits: want 1, got %d", resp.Daily[59].Visits)
+	}
+	if resp.Daily[0].Visits != 0 {
+		t.Fatalf("daily[0] (D-89).visits: want 0, got %d", resp.Daily[0].Visits)
+	}
+
+	// referer counts
+	refMap := map[string]int{}
+	for _, r := range resp.Referers {
+		refMap[r.Host] = r.Count
+	}
+	if refMap["t.me"] != 2 {
+		t.Fatalf("referers[t.me]: want 2, got %d (%+v)", refMap["t.me"], resp.Referers)
+	}
+	if refMap["(直接访问)"] != 1 {
+		t.Fatalf("referers[(直接访问)]: want 1, got %d (%+v)", refMap["(直接访问)"], resp.Referers)
+	}
+
+	// 404 path
+	r2 := te.do("GET", "/api/admin/audit/trips/999999", tok, nil, "")
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusNotFound {
+		t.Fatalf("nonexistent trip: want 404, got %d", r2.StatusCode)
+	}
+
+	// bad id
+	r3 := te.do("GET", "/api/admin/audit/trips/abc", tok, nil, "")
+	r3.Body.Close()
+	if r3.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad id: want 400, got %d", r3.StatusCode)
+	}
+}
+
+func TestAuditDoesNotWriteAuditLog(t *testing.T) {
+	te := newTestEnv(t)
+	te.seedUser(user.RoleAdmin, "admin", "pw")
+	tok := te.login("admin", "pw")
+	ctx := t.Context()
+
+	before, err := te.client.AuditLog.Query().Count(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, p := range []string{
+		"/api/admin/audit/events",
+		"/api/admin/audit/shares",
+		"/api/admin/audit/trips",
+	} {
+		r := te.do("GET", p, tok, nil, "")
+		r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s: want 200, got %d", p, r.StatusCode)
+		}
+	}
+
+	after, err := te.client.AuditLog.Query().Count(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatalf("audit_log row count changed: before=%d after=%d", before, after)
+	}
+}
+
 func TestAuditEventsDeletedTrip(t *testing.T) {
 	te := newTestEnv(t)
 	adminID := te.seedUser(user.RoleAdmin, "admin", "pw")

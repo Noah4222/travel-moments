@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	netURL "net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,10 +12,12 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/cloverstd/travel-moments/internal/ent"
+	"github.com/cloverstd/travel-moments/internal/ent/asset"
 	"github.com/cloverstd/travel-moments/internal/ent/assetview"
 	"github.com/cloverstd/travel-moments/internal/ent/sharelink"
 	"github.com/cloverstd/travel-moments/internal/ent/trip"
 	"github.com/cloverstd/travel-moments/internal/ent/visit"
+	"github.com/cloverstd/travel-moments/internal/oss"
 )
 
 // All endpoints in this file are mounted under /api/admin/audit and require
@@ -576,6 +579,318 @@ func (h *Handler) AuditTrips(c echo.Context) error {
 	return c.JSON(http.StatusOK, auditTripsResp{Trips: rows})
 }
 
+type auditDaily struct {
+	Date      string `json:"date"`
+	Visits    int    `json:"visits"`
+	UniqueIPs int    `json:"unique_ips"`
+}
+
+type auditTopAsset struct {
+	AssetID  int      `json:"asset_id"`
+	Views    int      `json:"views"`
+	ThumbURL *imgURLs `json:"thumb_url"`
+}
+
+type auditRefererRow struct {
+	Host  string `json:"host"`
+	Count int    `json:"count"`
+}
+
+type auditCountryRow struct {
+	Code  string `json:"code"`
+	Count int    `json:"count"`
+}
+
+type auditTripDetailResp struct {
+	Trip      map[string]any    `json:"trip"`
+	Shares    []auditShareRow   `json:"shares"`
+	Daily     []auditDaily      `json:"daily"`
+	TopAssets []auditTopAsset   `json:"top_assets"`
+	Referers  []auditRefererRow `json:"referers"`
+	Countries []auditCountryRow `json:"countries"`
+}
+
+// auditSharesForTrip returns auditShareRow entries for the given share IDs,
+// scoped to a single trip (used for the trip-detail view).
+func (h *Handler) auditSharesForTrip(ctx context.Context, tripID int, shareIDs []int) ([]auditShareRow, error) {
+	if len(shareIDs) == 0 {
+		return []auditShareRow{}, nil
+	}
+	shares, err := h.DB.ShareLink.Query().Where(sharelink.IDIn(shareIDs...)).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// child counts among these shares
+	childCountByParent := make(map[int]int)
+	allParents, err := h.DB.ShareLink.Query().
+		Where(sharelink.ParentShareIDNotNil()).
+		Select(sharelink.FieldParentShareID).
+		Ints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, pid := range allParents {
+		childCountByParent[pid]++
+	}
+
+	// visit aggregation for these shares
+	type visitAgg struct {
+		count   int
+		ips     map[string]struct{}
+		lastVis *time.Time
+	}
+	aggByShare := make(map[int]*visitAgg)
+	visits, err := h.DB.Visit.Query().Where(visit.ShareIDIn(shareIDs...)).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range visits {
+		a, ok := aggByShare[v.ShareID]
+		if !ok {
+			a = &visitAgg{ips: make(map[string]struct{})}
+			aggByShare[v.ShareID] = a
+		}
+		a.count++
+		if v.IP != "" {
+			a.ips[v.IP] = struct{}{}
+		}
+		if a.lastVis == nil || v.VisitedAt.After(*a.lastVis) {
+			vt := v.VisitedAt
+			a.lastVis = &vt
+		}
+	}
+
+	tt, err := h.DB.Trip.Query().Where(trip.IDEQ(tripID)).First(ctx)
+	tripTitle := "(已删除)"
+	if err == nil && tt != nil {
+		tripTitle = tt.Title
+	}
+
+	rows := make([]auditShareRow, 0, len(shares))
+	for _, s := range shares {
+		row := auditShareRow{
+			ID:             s.ID,
+			Code:           s.Code,
+			Scope:          string(s.Scope),
+			Note:           s.Note,
+			TripID:         s.TripID,
+			TripTitle:      tripTitle,
+			CreatedAt:      s.CreatedAt,
+			ExpiresAt:      s.ExpiresAt,
+			RevokedAt:      s.RevokedAt,
+			ChildCount:     childCountByParent[s.ID],
+			DisableForward: s.DisableForward,
+		}
+		if a := aggByShare[s.ID]; a != nil {
+			row.Visits = a.count
+			row.UniqueIPs = len(a.ips)
+			row.LastVisitAt = a.lastVis
+		}
+		rows = append(rows, row)
+	}
+	// Stable sort: created_at desc.
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rows[i].CreatedAt.After(rows[j].CreatedAt)
+	})
+	return rows, nil
+}
+
 func (h *Handler) AuditTripDetail(c echo.Context) error {
-	return echo.NewHTTPError(http.StatusNotImplemented, "not implemented")
+	ctx := c.Request().Context()
+
+	idStr := c.Param("id")
+	tripID, err := strconv.Atoi(idStr)
+	if err != nil || tripID <= 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "bad id")
+	}
+
+	t, err := h.DB.Trip.Query().Where(trip.IDEQ(tripID)).First(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return echo.NewHTTPError(http.StatusNotFound, "trip not found")
+		}
+		return err
+	}
+
+	shareIDs, err := h.shareIDsForTrip(ctx, tripID)
+	if err != nil {
+		return err
+	}
+
+	shares, err := h.auditSharesForTrip(ctx, tripID, shareIDs)
+	if err != nil {
+		return err
+	}
+
+	// 90-day window in server local time.
+	now := time.Now()
+	loc := now.Location()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	windowStart := dayStart.AddDate(0, 0, -(90 - 1))
+
+	daily := make([]auditDaily, 90)
+	bucketIPs := make([]map[string]struct{}, 90)
+	for i := 0; i < 90; i++ {
+		d := windowStart.AddDate(0, 0, i)
+		daily[i] = auditDaily{Date: d.Format("2006-01-02")}
+		bucketIPs[i] = make(map[string]struct{})
+	}
+
+	refererCount := make(map[string]int)
+	countryCount := make(map[string]int)
+
+	// Visits in window, scoped to this trip's shares.
+	var visits []*ent.Visit
+	if len(shareIDs) > 0 {
+		visits, err = h.DB.Visit.Query().
+			Where(
+				visit.ShareIDIn(shareIDs...),
+				visit.VisitedAtGTE(windowStart),
+			).
+			All(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	visitIDsInWindow := make([]int, 0, len(visits))
+	for _, v := range visits {
+		d := v.VisitedAt.In(loc)
+		bucketDate := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, loc)
+		idx := int(bucketDate.Sub(windowStart).Hours() / 24)
+		if idx >= 0 && idx < 90 {
+			daily[idx].Visits++
+			if v.IP != "" {
+				bucketIPs[idx][v.IP] = struct{}{}
+			}
+		}
+		// referer host
+		host := "(直接访问)"
+		if v.Referer != "" {
+			if u, err := netURL.Parse(v.Referer); err == nil {
+				if h := u.Hostname(); h != "" {
+					host = h
+				}
+			}
+		}
+		refererCount[host]++
+		if v.Country != "" {
+			countryCount[v.Country]++
+		}
+		visitIDsInWindow = append(visitIDsInWindow, v.ID)
+	}
+	for i := range daily {
+		daily[i].UniqueIPs = len(bucketIPs[i])
+	}
+
+	// Top assets: aggregate asset_views joined to visits in window.
+	assetViewCount := make(map[int]int)
+	if len(visitIDsInWindow) > 0 {
+		views, err := h.DB.AssetView.Query().
+			Where(assetview.VisitIDIn(visitIDsInWindow...)).
+			All(ctx)
+		if err != nil {
+			return err
+		}
+		for _, v := range views {
+			assetViewCount[v.AssetID]++
+		}
+	}
+	// Sort assets by views desc, take top 20.
+	type assetRank struct {
+		id    int
+		views int
+	}
+	ranks := make([]assetRank, 0, len(assetViewCount))
+	for aid, n := range assetViewCount {
+		ranks = append(ranks, assetRank{id: aid, views: n})
+	}
+	sort.Slice(ranks, func(i, j int) bool {
+		if ranks[i].views == ranks[j].views {
+			return ranks[i].id < ranks[j].id
+		}
+		return ranks[i].views > ranks[j].views
+	})
+	if len(ranks) > 20 {
+		ranks = ranks[:20]
+	}
+	topAssets := make([]auditTopAsset, 0, len(ranks))
+	if len(ranks) > 0 {
+		ids := make([]int, 0, len(ranks))
+		for _, r := range ranks {
+			ids = append(ids, r.id)
+		}
+		assets, err := h.DB.Asset.Query().Where(asset.IDIn(ids...)).All(ctx)
+		if err != nil {
+			return err
+		}
+		assetByID := make(map[int]*ent.Asset, len(assets))
+		for _, a := range assets {
+			assetByID[a.ID] = a
+		}
+		ttl := h.Settings.URLTTL()
+		for _, r := range ranks {
+			a, ok := assetByID[r.id]
+			if !ok {
+				continue // deleted
+			}
+			row := auditTopAsset{AssetID: r.id, Views: r.views}
+			if h.OSS != nil && h.SignedURLs != nil {
+				switch a.Kind {
+				case asset.KindPhoto:
+					row.ThumbURL = h.signImg(a.ID, a.OssKey, oss.VariantThumbAVIF, oss.VariantThumbWebP, ttl)
+				case asset.KindVideo:
+					row.ThumbURL = h.signImg(a.ID, a.OssKey, oss.VariantVideoCoverAVIF, oss.VariantVideoCoverWebP, ttl)
+				}
+			}
+			topAssets = append(topAssets, row)
+		}
+	}
+
+	// Top referers (10).
+	refRows := make([]auditRefererRow, 0, len(refererCount))
+	for host, n := range refererCount {
+		refRows = append(refRows, auditRefererRow{Host: host, Count: n})
+	}
+	sort.Slice(refRows, func(i, j int) bool {
+		if refRows[i].Count == refRows[j].Count {
+			return refRows[i].Host < refRows[j].Host
+		}
+		return refRows[i].Count > refRows[j].Count
+	})
+	if len(refRows) > 10 {
+		refRows = refRows[:10]
+	}
+
+	// Top countries (10).
+	countryRows := make([]auditCountryRow, 0, len(countryCount))
+	for code, n := range countryCount {
+		countryRows = append(countryRows, auditCountryRow{Code: code, Count: n})
+	}
+	sort.Slice(countryRows, func(i, j int) bool {
+		if countryRows[i].Count == countryRows[j].Count {
+			return countryRows[i].Code < countryRows[j].Code
+		}
+		return countryRows[i].Count > countryRows[j].Count
+	})
+	if len(countryRows) > 10 {
+		countryRows = countryRows[:10]
+	}
+
+	resp := auditTripDetailResp{
+		Trip: map[string]any{
+			"id":         t.ID,
+			"title":      t.Title,
+			"created_at": t.CreatedAt,
+		},
+		Shares:    shares,
+		Daily:     daily,
+		TopAssets: topAssets,
+		Referers:  refRows,
+		Countries: countryRows,
+	}
+
+	c.Response().Header().Set("Cache-Control", "private, max-age=30")
+	return c.JSON(http.StatusOK, resp)
 }
