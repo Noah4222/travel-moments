@@ -48,6 +48,8 @@ type Props = {
   onLoadMore?: () => void;
 };
 
+const SLIDESHOW_MS = 4000;
+
 export function Lightbox({
   assets,
   index: initialIndex,
@@ -61,9 +63,48 @@ export function Lightbox({
 }: Props) {
   const [index, setIndex] = useState(initialIndex);
   const [autoPlay, setAutoPlay] = useState(false);
+  const [slideProgress, setSlideProgress] = useState(0);
   const [quality, setQuality] = useState<PhotoQuality>("preview");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const touchRef = useRef<{ x: number; y: number; t: number } | null>(null);
   const asset = assets[index];
+
+  // Lock background scroll while the lightbox is open. Without this, pinch /
+  // scroll wheel events leak through to the underlying grid, which both feels
+  // broken and can shift the viewport so the close button is offscreen.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    const prevTouch = document.body.style.touchAction;
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.touchAction = prevTouch;
+    };
+  }, []);
+
+  // Sync local state with the browser's actual fullscreen status — pressing
+  // Esc to exit fullscreen bypasses our toggle handler entirely.
+  useEffect(() => {
+    function onChange() {
+      setIsFullscreen(!!document.fullscreenElement);
+    }
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (containerRef.current?.requestFullscreen) {
+        await containerRef.current.requestFullscreen();
+      }
+    } catch {
+      /* user gesture lost or unsupported — ignore */
+    }
+  }, []);
 
   // Switching to a new asset resets to the lightest variant so we don't
   // accidentally re-download an original-size file on every navigation.
@@ -128,23 +169,44 @@ export function Lightbox({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft") go(-1);
+      // Esc inside fullscreen is consumed by the browser to exit fullscreen;
+      // only treat it as "close" when we're not fullscreen.
+      if (e.key === "Escape") {
+        if (!document.fullscreenElement) onClose();
+      } else if (e.key === "ArrowLeft") go(-1);
       else if (e.key === "ArrowRight") go(1);
       else if (e.key === " ") {
         e.preventDefault();
         setAutoPlay((v) => !v);
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        void toggleFullscreen();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [go, onClose]);
+  }, [go, onClose, toggleFullscreen]);
 
+  // Slideshow tick: drives both the auto-advance and the countdown display.
+  // Re-keying on asset.id resets progress whenever we move to a new slide
+  // (manual nav or auto-advance both bump the id).
   useEffect(() => {
-    if (!autoPlay || singleMode || asset?.kind === "video") return;
-    const t = window.setInterval(() => go(1), 4000);
+    if (!autoPlay || singleMode || asset?.kind === "video") {
+      setSlideProgress(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setSlideProgress(0);
+    const t = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= SLIDESHOW_MS) {
+        go(1);
+      } else {
+        setSlideProgress(elapsed / SLIDESHOW_MS);
+      }
+    }, 80);
     return () => window.clearInterval(t);
-  }, [autoPlay, go, singleMode, asset?.kind]);
+  }, [autoPlay, go, singleMode, asset?.kind, asset?.id]);
 
   if (!asset) return null;
 
@@ -156,8 +218,14 @@ export function Lightbox({
     return !!el?.closest("button, a, input, textarea, select, [role=button]");
   }
 
+  const secondsLeft = Math.max(
+    1,
+    Math.ceil((1 - slideProgress) * (SLIDESHOW_MS / 1000)),
+  );
+
   return (
     <div
+      ref={containerRef}
       onClick={(e) => {
         // Only close when the click is truly on the backdrop, not bubbling
         // up from a button / image / panel.
@@ -182,8 +250,19 @@ export function Lightbox({
           go(dx < 0 ? 1 : -1);
         }
       }}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/95 p-3 sm:p-4"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden overscroll-contain bg-black/95 p-3 sm:p-4"
     >
+      {autoPlay && !singleMode && asset.kind === "photo" && (
+        <div
+          className="pointer-events-none absolute left-0 top-0 z-20 h-0.5 w-full bg-white/10"
+          aria-hidden
+        >
+          <div
+            className="h-full bg-white/85"
+            style={{ width: `${Math.min(100, slideProgress * 100)}%` }}
+          />
+        </div>
+      )}
       <div className="absolute right-3 top-3 z-10 flex flex-wrap items-center justify-end gap-2 sm:right-4 sm:top-4">
         {asset.kind === "photo" && (
           <QualitySwitch value={quality} onChange={setQuality} />
@@ -191,17 +270,38 @@ export function Lightbox({
         <div className="flex items-center gap-1.5 rounded-full bg-black/45 p-1 backdrop-blur-md ring-1 ring-white/15">
           <DownloadButton asset={asset} mode={mode} />
           {!singleMode && assets.length > 1 && (
-            <IconButton
-              label={autoPlay ? "暂停轮播" : "开始轮播"}
-              active={autoPlay}
-              onClick={(e) => {
-                e.stopPropagation();
-                setAutoPlay((v) => !v);
-              }}
-            >
-              {autoPlay ? <PauseIcon /> : <PlayIcon />}
-            </IconButton>
+            <>
+              {autoPlay && asset.kind === "photo" && (
+                <span
+                  className="select-none px-1.5 text-xs font-medium tabular-nums text-white/85"
+                  aria-live="polite"
+                  title={`${secondsLeft} 秒后切换`}
+                >
+                  {secondsLeft}s
+                </span>
+              )}
+              <IconButton
+                label={autoPlay ? "暂停轮播" : "开始轮播"}
+                active={autoPlay}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAutoPlay((v) => !v);
+                }}
+              >
+                {autoPlay ? <PauseIcon /> : <PlayIcon />}
+              </IconButton>
+            </>
           )}
+          <IconButton
+            label={isFullscreen ? "退出全屏" : "全屏预览"}
+            active={isFullscreen}
+            onClick={(e) => {
+              e.stopPropagation();
+              void toggleFullscreen();
+            }}
+          >
+            {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+          </IconButton>
           <IconButton
             label="关闭"
             onClick={(e) => {
@@ -368,6 +468,28 @@ function PauseIcon() {
     <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden>
       <rect x="6" y="4.5" width="4" height="15" rx="1" />
       <rect x="14" y="4.5" width="4" height="15" rx="1" />
+    </svg>
+  );
+}
+
+function FullscreenIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 9V4h5" />
+      <path d="M20 9V4h-5" />
+      <path d="M4 15v5h5" />
+      <path d="M20 15v5h-5" />
+    </svg>
+  );
+}
+
+function FullscreenExitIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M9 4v5H4" />
+      <path d="M15 4v5h5" />
+      <path d="M9 20v-5H4" />
+      <path d="M15 20v-5h5" />
     </svg>
   );
 }
