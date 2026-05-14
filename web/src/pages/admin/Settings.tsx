@@ -3,6 +3,7 @@ import QRCodeLib from "qrcode";
 import { api, type AppSettings, type Passkey, type User } from "@/lib/api";
 import { Button, Card, Input, Label } from "@/components/ui";
 import { ImageProcessEditor } from "@/components/ImageProcessEditor";
+import { ThemePicker } from "@/components/ThemePicker";
 import { isPasskeySupported, registerPasskey } from "@/lib/passkey";
 
 type RowDef = { key: string; label: string; desc: string };
@@ -124,6 +125,21 @@ export function SettingsPage() {
       </div>
 
       {msg && <p className="text-sm text-emerald-600">{msg}</p>}
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+          访客侧主题
+        </h2>
+        <ThemePicker
+          draft={drafts["public_theme"] ?? ""}
+          effective={s.effective["public_theme"] ?? "a"}
+          saving={busy === "public_theme"}
+          onSave={async (next) => {
+            setDrafts((d) => ({ ...d, public_theme: next }));
+            await save("public_theme", next);
+          }}
+        />
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">

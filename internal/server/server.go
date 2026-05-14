@@ -162,6 +162,7 @@ func New(cfg *config.Config, client *ent.Client, logger *slog.Logger) *echo.Echo
 	api.GET("/shares/:id/tree", h.ShareTree, auth.RequireRole(auth.RoleAdmin))
 
 	// Public (no JWT, but may carry share-session cookie)
+	api.GET("/public/site", h.PublicSite)
 	api.GET("/public/shares/:code/info", h.ShareInfo)
 	api.POST("/public/shares/:code/auth", h.AuthShare)
 	api.POST("/public/logout", h.Logout)

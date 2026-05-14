@@ -27,6 +27,7 @@ var managedKeys = []string{
 	settings.KeyImgPreviewAVIF,
 	settings.KeyImgCoverWebP,
 	settings.KeyImgCoverAVIF,
+	settings.KeyPublicTheme,
 }
 
 func defaultSettings() map[string]string {
@@ -41,6 +42,7 @@ func defaultSettings() map[string]string {
 		settings.KeyImgPreviewAVIF:  "image/resize,m_lfit,w_1600/quality,q_75/format,avif",
 		settings.KeyImgCoverWebP:    "image/resize,m_lfit,w_1600/quality,q_90/format,webp",
 		settings.KeyImgCoverAVIF:    "image/resize,m_lfit,w_1600/quality,q_80/format,avif",
+		settings.KeyPublicTheme:     "a",
 	}
 }
 
@@ -87,6 +89,10 @@ func (h *Handler) AdminUpdateSetting(c echo.Context) error {
 		settings.KeyImgPreviewWebP, settings.KeyImgPreviewAVIF,
 		settings.KeyImgCoverWebP, settings.KeyImgCoverAVIF:
 		// any string allowed
+	case settings.KeyPublicTheme:
+		if req.Value != "" && !settings.IsValidTheme(req.Value) {
+			return echo.NewHTTPError(http.StatusBadRequest, "theme must be one of a / b / c")
+		}
 	default:
 		return echo.NewHTTPError(http.StatusBadRequest, "unknown key")
 	}

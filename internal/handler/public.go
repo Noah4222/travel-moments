@@ -24,8 +24,20 @@ import (
 
 // ---- DTOs ----
 
+type publicSiteResp struct {
+	Theme string `json:"theme"`
+}
+
+// PublicSite exposes a tiny, no-auth bootstrap payload for visitor pages
+// (theme, brand etc.) so routes without an active share session (Splash,
+// SharePassword) can still pick up the current visual theme.
+func (h *Handler) PublicSite(c echo.Context) error {
+	return c.JSON(http.StatusOK, publicSiteResp{Theme: h.Settings.PublicTheme()})
+}
+
 type publicScopeResp struct {
 	Scope      string         `json:"scope"`
+	Theme      string         `json:"theme,omitempty"`
 	TripID     int            `json:"trip_id,omitempty"`
 	Title      string         `json:"title,omitempty"`
 	Cover      *string        `json:"cover_url,omitempty"`
@@ -94,6 +106,7 @@ func (h *Handler) PublicScope(c echo.Context) error {
 		}
 		out := publicScopeResp{
 			Scope:     string(link.Scope),
+			Theme:     h.Settings.PublicTheme(),
 			ShareNote: link.Note,
 			Trips:     trips,
 		}
@@ -112,6 +125,7 @@ func (h *Handler) PublicScope(c echo.Context) error {
 
 	out := publicScopeResp{
 		Scope:      string(link.Scope),
+		Theme:      h.Settings.PublicTheme(),
 		TripID:     t.ID,
 		Title:      t.Title,
 		Subtitle:   t.Location,
@@ -253,6 +267,7 @@ func (h *Handler) PublicTripScope(c echo.Context) error {
 	}
 	out := publicScopeResp{
 		Scope:      "trip",
+		Theme:      h.Settings.PublicTheme(),
 		TripID:     t.ID,
 		Title:      t.Title,
 		Subtitle:   t.Location,

@@ -1,30 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, type PublicAsset, type PublicTripSummary } from "@/lib/api";
-import { Badge, Button, Card } from "@/components/ui";
+import { api } from "@/lib/api";
 import { ForwardDialog } from "@/components/ForwardDialog";
-import { CommentBox } from "@/components/CommentBox";
-import { PicturePreview } from "@/components/PicturePreview";
 import { Lightbox } from "@/components/Lightbox";
 import { Spinner } from "@/components/Spinner";
-
-type Scope = {
-  scope: string;
-  trip_id?: number;
-  title?: string;
-  subtitle?: string;
-  share_note?: string;
-  assets?: PublicAsset[];
-  next_cursor?: number | null;
-  total?: number;
-  trips?: PublicTripSummary[];
-};
+import { useTheme } from "@/themes/ThemeProvider";
+import { ThemedShareView } from "@/themes/share";
+import { isThemeId } from "@/themes/tokens";
+import type { ShareScope } from "@/themes/share/types";
 
 export function SharedTripPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useSearchParams();
-  const [scope, setScope] = useState<Scope | null>(null);
-  const [tripScope, setTripScope] = useState<Scope | null>(null);
+  const { refresh: refreshTheme, setLocalTheme } = useTheme();
+  const [scope, setScope] = useState<ShareScope | null>(null);
+  const [tripScope, setTripScope] = useState<ShareScope | null>(null);
   const [tripLoading, setTripLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -35,7 +25,14 @@ export function SharedTripPage() {
   useEffect(() => {
     api
       .publicScope()
-      .then((d) => setScope(d as Scope))
+      .then((d) => {
+        const s = d as ShareScope;
+        setScope(s);
+        // Share scope carries the current public theme; sync the provider
+        // so we paint with the right tokens without a second round-trip.
+        if (isThemeId(s.theme)) setLocalTheme(s.theme);
+        else refreshTheme();
+      })
       .catch((err) => {
         if (
           err &&
@@ -47,7 +44,7 @@ export function SharedTripPage() {
         }
         setError(String(err));
       });
-  }, [navigate]);
+  }, [navigate, refreshTheme, setLocalTheme]);
 
   useEffect(() => {
     if (!scope || scope.scope !== "multi") return;
@@ -60,16 +57,13 @@ export function SharedTripPage() {
     setTripLoading(true);
     api
       .publicTripScope(id)
-      .then((d) => setTripScope(d as Scope))
+      .then((d) => setTripScope(d as ShareScope))
       .catch(() => setTripScope(null))
       .finally(() => setTripLoading(false));
   }, [scope, search]);
 
   const activeScope = scope?.scope === "multi" ? tripScope : scope;
 
-  // Pagination: load the next page of assets for the active view (trip share
-  // or one-trip-from-multi). Appends to whichever scope object is currently
-  // displayed.
   const loadMore = useCallback(async () => {
     if (!activeScope || loadingMore) return;
     const cursor = activeScope.next_cursor;
@@ -81,7 +75,7 @@ export function SharedTripPage() {
         limit: 100,
         tripID: scope?.scope === "multi" ? activeScope.trip_id : undefined,
       });
-      const append = (s: Scope | null): Scope | null => {
+      const append = (s: ShareScope | null): ShareScope | null => {
         if (!s) return s;
         const seen = new Set((s.assets ?? []).map((a) => a.id));
         const merged = [
@@ -97,7 +91,6 @@ export function SharedTripPage() {
     }
   }, [activeScope, loadingMore, scope?.scope]);
 
-  // Bottom sentinel triggers loadMore when in view.
   useEffect(() => {
     if (!activeScope || activeScope.next_cursor == null) return;
     const el = sentinelRef.current;
@@ -111,6 +104,7 @@ export function SharedTripPage() {
     io.observe(el);
     return () => io.disconnect();
   }, [activeScope, loadMore]);
+
   useEffect(() => {
     if (!activeScope?.assets) return;
     const raw = search.get("asset");
@@ -142,6 +136,9 @@ export function SharedTripPage() {
   function backToTrips() {
     setSearch({});
   }
+  function logout() {
+    void api.publicLogout().then(() => navigate("/"));
+  }
 
   if (error && !scope) return <div className="p-8 text-rose-600">{error}</div>;
   if (!scope) {
@@ -153,95 +150,23 @@ export function SharedTripPage() {
   }
 
   const isMulti = scope.scope === "multi";
-  const showingTripView = !isMulti || !!tripScope;
   const viewing = isMulti ? tripScope : scope;
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <header className="border-b border-zinc-200 bg-white/70 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/70">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-3">
-          <div className="min-w-0">
-            {isMulti && tripScope && (
-              <button
-                onClick={backToTrips}
-                className="mb-1 text-xs text-zinc-500 hover:text-zinc-700"
-              >
-                ← 返回相册列表
-              </button>
-            )}
-            <h1 className="truncate text-lg font-semibold tracking-tight">
-              {showingTripView
-                ? viewing?.title || "Travel Moments"
-                : "相册集"}
-            </h1>
-            {viewing?.subtitle && (
-              <p className="text-xs text-zinc-500">📍 {viewing.subtitle}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setForwardOpen(true)}>
-              转发
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => api.publicLogout().then(() => navigate("/"))}
-            >
-              退出
-            </Button>
-          </div>
-        </div>
-        {scope.share_note && !tripScope && (
-          <p className="mx-auto max-w-[1600px] px-4 pb-3 text-sm text-zinc-500">
-            📝 {scope.share_note}
-          </p>
-        )}
-      </header>
-
-      <main className="mx-auto max-w-[1600px] space-y-6 px-4 py-6">
-        {isMulti && !tripScope ? (
-          <TripListView trips={scope.trips ?? []} onOpen={openTrip} />
-        ) : tripLoading ? (
-          <div className="flex items-center justify-center gap-2 py-12 text-zinc-500">
-            <Spinner /> 加载中…
-          </div>
-        ) : viewing?.assets && viewing.assets.length > 0 ? (
-          <>
-            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-8">
-              {viewing.assets.map((a, i) => (
-                <PublicTile key={a.id} asset={a} onClick={() => openAt(i)} />
-              ))}
-            </ul>
-            {viewing.next_cursor != null && (
-              <div
-                ref={sentinelRef}
-                className="flex items-center justify-center gap-2 py-6 text-sm text-zinc-500"
-              >
-                {loadingMore ? (
-                  <>
-                    <Spinner className="h-4 w-4" /> 加载更多…
-                  </>
-                ) : (
-                  <span>下滑加载更多</span>
-                )}
-              </div>
-            )}
-            {viewing.next_cursor == null &&
-              viewing.total != null &&
-              viewing.total > 0 && (
-                <p className="py-6 text-center text-xs text-zinc-400">
-                  — 共 {viewing.total} 张，到底啦 —
-                </p>
-              )}
-          </>
-        ) : (
-          <Card className="p-8 text-center text-sm text-zinc-500">还没有内容</Card>
-        )}
-
-        {showingTripView && viewing?.trip_id != null && (
-          <CollapsibleBoard tripID={viewing.trip_id} />
-        )}
-      </main>
+    <>
+      <ThemedShareView
+        scope={scope}
+        viewing={viewing}
+        isMulti={isMulti}
+        tripLoading={tripLoading}
+        loadingMore={loadingMore}
+        sentinelRef={sentinelRef}
+        onOpenAsset={openAt}
+        onOpenTrip={openTrip}
+        onBackToTrips={backToTrips}
+        onForward={() => setForwardOpen(true)}
+        onLogout={logout}
+      />
 
       {activeIndex !== null && viewing?.assets && viewing.assets.length > 0 && (
         <Lightbox
@@ -260,157 +185,6 @@ export function SharedTripPage() {
           onClose={() => setForwardOpen(false)}
         />
       )}
-    </div>
-  );
-}
-
-type MonthGroup = { key: string; year: number; month: number; trips: PublicTripSummary[] };
-
-function groupByMonth(trips: PublicTripSummary[]): MonthGroup[] {
-  const buckets = new Map<string, MonthGroup>();
-  for (const t of trips) {
-    const d = new Date(t.started_at ?? t.created_at);
-    const year = d.getFullYear();
-    const month = d.getMonth() + 1;
-    const key = `${year}-${String(month).padStart(2, "0")}`;
-    let g = buckets.get(key);
-    if (!g) {
-      g = { key, year, month, trips: [] };
-      buckets.set(key, g);
-    }
-    g.trips.push(t);
-  }
-  // Backend already orders newest first; sort group keys descending too.
-  return Array.from(buckets.values()).sort((a, b) => b.key.localeCompare(a.key));
-}
-
-function TripListView({
-  trips,
-  onOpen,
-}: {
-  trips: PublicTripSummary[];
-  onOpen: (id: number) => void;
-}) {
-  if (trips.length === 0) {
-    return <Card className="p-8 text-center text-sm text-zinc-500">没有相册</Card>;
-  }
-  const groups = groupByMonth(trips);
-  return (
-    <div className="space-y-7">
-      {groups.map((g) => (
-        <section key={g.key} className="space-y-3">
-          <div className="sticky top-14 z-10 -mx-3 flex items-baseline gap-3 border-b border-zinc-200 bg-zinc-50/85 px-3 py-2 backdrop-blur sm:-mx-4 sm:px-4 dark:border-zinc-800 dark:bg-zinc-950/85">
-            <h2 className="text-base font-semibold tracking-tight sm:text-lg">
-              {g.year} 年 {g.month} 月
-            </h2>
-            <span className="text-xs text-zinc-500">{g.trips.length} 个相册</span>
-          </div>
-          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {g.trips.map((t) => (
-              <li key={t.id}>
-                <button
-                  type="button"
-                  onClick={() => onOpen(t.id)}
-                  className="block w-full text-left"
-                >
-                  <Card className="overflow-hidden [content-visibility:auto] [contain-intrinsic-size:280px] hover:shadow-lg">
-                    <div className="relative aspect-[16/9] bg-zinc-100 dark:bg-zinc-900">
-                      <PicturePreview
-                        urls={t.cover_url}
-                        className="h-full w-full object-cover"
-                      />
-                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                      <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
-                        <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-white/85">
-                          {t.location && <span>📍 {t.location}</span>}
-                          <span>📅 {new Date(t.started_at ?? t.created_at).toLocaleDateString()}</span>
-                          <span>{t.asset_count} 张内容</span>
-                        </div>
-                        <h3 className="text-xl font-semibold drop-shadow-md">{t.title}</h3>
-                        {t.description && (
-                          <p className="mt-1 line-clamp-2 text-xs text-white/85 sm:text-sm">
-                            {t.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function CollapsibleBoard({ tripID }: { tripID: number }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Card className="p-4">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between text-sm font-medium text-zinc-700 transition hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
-      >
-        <span>💬 留言板</span>
-        <span className="text-xs text-zinc-400">{open ? "收起 ▴" : "展开 ▾"}</span>
-      </button>
-      {open && (
-        <div className="mt-4">
-          <CommentBox targetType="trip" targetID={tripID} />
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function PublicTile({ asset, onClick }: { asset: PublicAsset; onClick: () => void }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const live = asset.is_live_photo && asset.urls.motion;
-
-  return (
-    <li
-      className="group relative aspect-square overflow-hidden rounded-lg bg-zinc-100 [content-visibility:auto] [contain-intrinsic-size:200px] dark:bg-zinc-900"
-      onMouseEnter={() => {
-        if (live && videoRef.current) {
-          videoRef.current.currentTime = 0;
-          void videoRef.current.play();
-        }
-      }}
-      onMouseLeave={() => {
-        if (live && videoRef.current) {
-          videoRef.current.pause();
-          videoRef.current.currentTime = 0;
-        }
-      }}
-    >
-      <button type="button" onClick={onClick} className="block h-full w-full">
-        <PicturePreview
-          urls={asset.kind === "video" ? asset.urls.video_cover : asset.urls.thumb}
-          className="h-full w-full object-cover"
-        />
-        {live && (
-          <video
-            ref={videoRef}
-            src={asset.urls.motion}
-            muted
-            playsInline
-            preload="none"
-            className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0 group-hover:opacity-100"
-          />
-        )}
-      </button>
-      <div className="pointer-events-none absolute left-2 top-2 flex gap-1">
-        {asset.kind === "video" && <Badge tone="warning">▶ 视频</Badge>}
-        {live && <Badge tone="neutral">⚡ Live</Badge>}
-      </div>
-      {asset.view_count != null && (
-        <span className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-xs text-white">
-          👁 {asset.view_count}
-        </span>
-      )}
-    </li>
+    </>
   );
 }

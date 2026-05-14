@@ -309,9 +309,11 @@ export const api = {
       scope: string;
       expires_in_seconds: number;
     }>(`/public/shares/${code}/auth`, { method: "POST", body: { password } }),
+  publicSite: () => apiFetch<{ theme: string }>("/public/site"),
   publicScope: () =>
     apiFetch<{
       scope: string;
+      theme?: string;
       trip_id?: number;
       title?: string;
       subtitle?: string;

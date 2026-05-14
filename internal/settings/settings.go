@@ -27,7 +27,22 @@ const (
 	KeyImgPreviewAVIF = "image_process_preview_avif"
 	KeyImgCoverWebP   = "image_process_cover_webp"
 	KeyImgCoverAVIF   = "image_process_cover_avif"
+
+	// Public-facing visual theme. One of "a", "b", "c". Default "a".
+	KeyPublicTheme = "public_theme"
 )
+
+// PublicThemes lists the allowed theme identifiers in display order.
+var PublicThemes = []string{"a", "b", "c"}
+
+func IsValidTheme(v string) bool {
+	for _, t := range PublicThemes {
+		if t == v {
+			return true
+		}
+	}
+	return false
+}
 
 // variantKey maps a Variant to the setting key that overrides its process.
 func variantKey(v oss.Variant) string {
@@ -102,6 +117,7 @@ func (s *Store) All() map[string]string {
 		KeyUploadCacheCtl: s.UploadCacheControl(),
 		KeyAssetShareTTL:  s.AssetShareTTL().String(),
 		KeyUploadConcurrency: strconv.Itoa(s.UploadConcurrency()),
+		KeyPublicTheme:    s.PublicTheme(),
 	}
 	for _, k := range ImageProcessKeys {
 		m[k] = s.ImageProcessByKey(k)
@@ -215,6 +231,15 @@ func (s *Store) UploadConcurrency() int {
 		return 32
 	}
 	return n
+}
+
+// PublicTheme returns the active visitor-facing theme id (a/b/c). Defaults to "a".
+func (s *Store) PublicTheme() string {
+	v := s.Raw(KeyPublicTheme)
+	if IsValidTheme(v) {
+		return v
+	}
+	return "a"
 }
 
 func (s *Store) AssetShareTTL() time.Duration {
