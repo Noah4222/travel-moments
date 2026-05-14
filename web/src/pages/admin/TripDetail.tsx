@@ -294,8 +294,8 @@ export function TripDetailPage() {
               {isAdmin ? (
                 <input
                   type="date"
-                  defaultValue={trip.started_at ? trip.started_at.slice(0, 10) : ""}
-                  onBlur={async (e) => {
+                  value={trip.started_at ? trip.started_at.slice(0, 10) : ""}
+                  onChange={async (e) => {
                     const v = e.target.value;
                     await api.updateTrip(tripId, {
                       started_at: v ? new Date(v + "T00:00:00").toISOString() : undefined,
